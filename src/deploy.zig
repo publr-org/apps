@@ -179,7 +179,7 @@ pub const Job = struct {
         const bearer = try std.fmt.allocPrint(a, "Bearer {s}", .{self.token});
         const result = try client.fetch(.{
             .location = .{
-                .url = try std.fmt.allocPrint(a, "{s}/api/cloud/deploy_site", .{self.base}),
+                .url = try std.fmt.allocPrint(a, "{s}/api/cloud.deploy_site", .{self.base}),
             },
             .method = .POST,
             .payload = payload,
