@@ -110,7 +110,7 @@ pub const Cloud = struct {
             const body = std.fmt.bufPrint(&body_buf, "{{\"id\":\"{s}\"}}", .{token[0..dot]}) catch "";
             var arena: std.heap.ArenaAllocator = .init(self.gpa);
             defer arena.deinit();
-            _ = request(self.io, arena.allocator(), self.base, .POST, "/api/device/revoke", .{
+            _ = request(self.io, arena.allocator(), self.base, .POST, "/api/device.revoke", .{
                 .payload = body,
                 .content_type = "application/json",
                 .token = token,
@@ -187,7 +187,7 @@ const Check = struct {
         var arena: std.heap.ArenaAllocator = .init(self.cloud.gpa);
         defer arena.deinit();
         const a = arena.allocator();
-        const path = std.fmt.allocPrint(a, "/api/cloud/check_address?slug={s}", .{self.slug}) catch "";
+        const path = std.fmt.allocPrint(a, "/api/cloud.check_address?slug={s}", .{self.slug}) catch "";
         if (request(self.cloud.io, a, self.cloud.base, .GET, path, .{
             .token = self.token,
         })) |reply| {
@@ -232,7 +232,7 @@ const Job = struct {
     fn fetch(self: *Job) void {
         var arena: std.heap.ArenaAllocator = .init(self.cloud.gpa);
         const a = arena.allocator();
-        const reply = request(self.cloud.io, a, self.cloud.base, .GET, "/api/cloud/spaces", .{
+        const reply = request(self.cloud.io, a, self.cloud.base, .GET, "/api/cloud.spaces", .{
             .token = self.token.?,
         }) catch {
             self.problem = "Publr Cloud could not be reached.";
