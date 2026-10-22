@@ -1,0 +1,867 @@
+//! Home: every site. Laid out as PublrDesign's file browser (a sidebar, the sites as
+//! pictures in a grid or as rows) and set as Publr's admin is: its type, greys, sidebar,
+//! page title and buttons. The sidebar (Recent, On this Mac, Cloud's spaces, the account
+//! at its foot), the bar (where you are, grid or list), the page's title with New site,
+//! the sites, and a site's menu. Layout and hit testing together, so what is drawn is what
+//! answers the mouse.
+
+const std = @import("std");
+const ui = @import("ui");
+const icons = @import("publr_icons");
+const mark = @import("mark.zig");
+const Theme = @import("theme.zig").Theme;
+const centred = @import("bar.zig").centred;
+
+pub const sidebar_width: f32 = 240;
+const header_height: f32 = 48;
+/// The page's title, its count and New site, under the bar.
+const head_height: f32 = 100;
+const pad: f32 = 24;
+const gap: f32 = 20;
+const card_min: f32 = 224;
+const meta_height: f32 = 50;
+const row_height: f32 = 56;
+/// A sidebar row (28) and the 2 between rows.
+const nav_step: f32 = 30;
+const nav_row: f32 = 28;
+/// A section's label ("CLOUD") with the room above it.
+const label_height: f32 = 42;
+const account_height: f32 = 56;
+const menu_width: f32 = 220;
+const menu_item: f32 = 30;
+const menu_pad: f32 = 6;
+
+pub const Kind = enum {
+    local,
+    cloud,
+};
+
+/// A site as Home shows it.
+pub const Item = struct {
+    name: []const u8,
+    /// "On this Mac · Running", "ada.publr.app · Live".
+    detail: []const u8,
+    kind: Kind,
+    running: bool,
+    /// Its thumbnail's name in the `ui` (null: none yet).
+    thumb: ?[]const u8 = null,
+};
+
+pub const View = union(enum) {
+    recents,
+    local,
+    space: usize,
+};
+
+pub const Space = struct {
+    name: []const u8,
+    count: usize,
+};
+
+pub const Account = union(enum) {
+    signed_out,
+    /// The browser is open on Cloud's sign-in page.
+    signing_in,
+    signed_in: []const u8,
+};
+
+pub const Layout = enum {
+    grid,
+    list,
+};
+
+pub const MenuItem = struct {
+    title: []const u8 = "",
+    tag: u32 = 0,
+    enabled: bool = true,
+    separator: bool = false,
+};
+
+pub const Menu = struct {
+    x: f32,
+    /// Its top, or its bottom when it opens upward.
+    y: f32,
+    items: []const MenuItem,
+    /// Opens upward from `y` (the account's menu, at the sidebar's foot).
+    above: bool = false,
+};
+
+pub const Target = union(enum) {
+    none,
+    account,
+    sign_in,
+    recents,
+    local,
+    space: usize,
+    show_grid,
+    show_list,
+    new_site,
+    item: usize,
+    item_menu: usize,
+    menu_item: usize,
+    /// A click outside an open menu closes it.
+    outside_menu,
+};
+
+pub const State = struct {
+    /// Where Home starts (under the tab bar).
+    top: f32,
+    width: f32,
+    height: f32,
+    view: View,
+    layout: Layout,
+    items: []const Item,
+    local_count: usize,
+    spaces: []const Space,
+    account: Account,
+    hover: Target,
+    scroll: f32,
+    menu: ?Menu,
+    title: []const u8,
+};
+
+fn same(a: Target, b: Target) bool {
+    return std.meta.eql(a, b);
+}
+
+// Layout.
+
+fn contentRect(s: State) ui.Rect {
+    const top = s.top + header_height + head_height;
+    return .{
+        .x = sidebar_width,
+        .y = top,
+        .w = s.width - sidebar_width,
+        .h = s.height - top,
+    };
+}
+
+fn columns(s: State) usize {
+    const room = contentRect(s).w - 2 * pad;
+    return @max(1, @as(usize, @intFromFloat(@floor((room + gap) / (card_min + gap)))));
+}
+
+fn cardWidth(s: State) f32 {
+    const n: f32 = @floatFromInt(columns(s));
+    return (contentRect(s).w - 2 * pad - gap * (n - 1)) / n;
+}
+
+/// The item's whole place (thumbnail and text, or the row), scrolled.
+pub fn itemRect(s: State, i: usize) ui.Rect {
+    const c = contentRect(s);
+    switch (s.layout) {
+        .grid => {
+            const w = cardWidth(s);
+            const h = w * 3 / 4 + meta_height;
+            const col: f32 = @floatFromInt(i % columns(s));
+            const row: f32 = @floatFromInt(i / columns(s));
+            return .{
+                .x = c.x + pad + col * (w + gap),
+                .y = c.y + pad + row * (h + gap) - s.scroll,
+                .w = w,
+                .h = h,
+            };
+        },
+        .list => return .{
+            .x = c.x + pad,
+            .y = c.y + row_height * @as(f32, @floatFromInt(i)) - s.scroll,
+            .w = c.w - 2 * pad,
+            .h = row_height,
+        },
+    }
+}
+
+fn thumbRect(s: State, i: usize) ui.Rect {
+    const r = itemRect(s, i);
+    return switch (s.layout) {
+        .grid => .{
+            .x = r.x,
+            .y = r.y,
+            .w = r.w,
+            .h = r.w * 3 / 4,
+        },
+        .list => .{
+            .x = r.x + 8,
+            .y = r.y + 10,
+            .w = 48,
+            .h = 36,
+        },
+    };
+}
+
+fn itemMenuRect(s: State, i: usize) ui.Rect {
+    return switch (s.layout) {
+        .grid => blk: {
+            const t = thumbRect(s, i);
+            break :blk .{
+                .x = t.x + t.w - 36,
+                .y = t.y + 8,
+                .w = 28,
+                .h = 28,
+            };
+        },
+        .list => blk: {
+            const r = itemRect(s, i);
+            break :blk .{
+                .x = r.x + r.w - 36,
+                .y = r.y + (r.h - 28) / 2,
+                .w = 28,
+                .h = 28,
+            };
+        },
+    };
+}
+
+/// How far the content scrolls at most.
+pub fn maxScroll(s: State) f32 {
+    if (s.items.len == 0) return 0;
+    const last = itemRect(.{
+        .top = s.top,
+        .width = s.width,
+        .height = s.height,
+        .view = s.view,
+        .layout = s.layout,
+        .items = s.items,
+        .local_count = s.local_count,
+        .spaces = s.spaces,
+        .account = s.account,
+        .hover = s.hover,
+        .scroll = 0,
+        .menu = null,
+        .title = s.title,
+    }, s.items.len - 1);
+    const c = contentRect(s);
+    return @max(0, last.y + last.h + pad - (c.y + c.h));
+}
+
+/// The account at the sidebar's foot: you, or Sign in to Publr Cloud.
+fn accountRect(s: State) ui.Rect {
+    return .{
+        .x = 8,
+        .y = s.height - account_height + 10,
+        .w = sidebar_width - 16,
+        .h = account_height - 20,
+    };
+}
+
+fn navRect(s: State, k: usize) ui.Rect {
+    return .{
+        .x = 8,
+        .y = s.top + header_height + 8 + nav_step * @as(f32, @floatFromInt(k)),
+        .w = sidebar_width - 16,
+        .h = nav_row,
+    };
+}
+
+/// Where the account's menu ends: just above the account.
+pub fn accountMenuBottom(s: State) f32 {
+    return accountRect(s).y - 4;
+}
+
+/// The Cloud section's label, under Recent and On this Mac.
+fn cloudLabelRect(s: State) ui.Rect {
+    var r = navRect(s, 2);
+    r.h = label_height;
+    return r;
+}
+
+/// The Cloud section's rows.
+fn spaceRect(s: State, i: usize) ui.Rect {
+    var r = navRect(s, 2 + i);
+    r.y += label_height;
+    return r;
+}
+
+const button_text: ui.TextStyle = .{
+    .size = 13,
+    .weight = 500,
+};
+
+fn newSiteRect(s: State, u: *ui.Ui) ui.Rect {
+    const w = u.measure("New site", button_text) + 28 + 22;
+    return .{
+        .x = s.width - pad - w,
+        .y = s.top + header_height + 30,
+        .w = w,
+        .h = 36,
+    };
+}
+
+fn layoutRect(s: State, which: Layout) ui.Rect {
+    return .{
+        .x = s.width - pad - 64 + @as(f32, if (which == .list) 32 else 0),
+        .y = s.top + 9,
+        .w = 32,
+        .h = 30,
+    };
+}
+
+fn menuItemHeight(it: MenuItem) f32 {
+    return if (it.separator) 9 else menu_item;
+}
+
+pub fn menuRect(s: State) ?ui.Rect {
+    const m = s.menu orelse return null;
+    var h: f32 = 2 * menu_pad;
+    for (m.items) |it| h += menuItemHeight(it);
+    return .{
+        .x = @min(m.x, s.width - menu_width - 8),
+        .y = if (m.above) @max(s.top + 8, m.y - h) else @min(m.y, s.height - h - 8),
+        .w = menu_width,
+        .h = h,
+    };
+}
+
+fn menuItemRect(s: State, k: usize) ui.Rect {
+    const r = menuRect(s).?;
+    var y = r.y + menu_pad;
+    for (s.menu.?.items[0..k]) |it| y += menuItemHeight(it);
+    return .{
+        .x = r.x + menu_pad,
+        .y = y,
+        .w = r.w - 2 * menu_pad,
+        .h = menuItemHeight(s.menu.?.items[k]),
+    };
+}
+
+// Hit testing.
+
+pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
+    if (s.menu) |m| {
+        if (!menuRect(s).?.contains(x, y)) return .outside_menu;
+        for (m.items, 0..) |it, k| {
+            if (it.separator or !it.enabled) continue;
+            if (menuItemRect(s, k).contains(x, y)) return .{ .menu_item = k };
+        }
+        return .none;
+    }
+    if (x < sidebar_width) {
+        if (accountRect(s).contains(x, y)) return if (s.account == .signed_in) .account else .sign_in;
+        if (navRect(s, 0).contains(x, y)) return .recents;
+        if (navRect(s, 1).contains(x, y)) return .local;
+        if (s.account == .signed_in) for (s.spaces, 0..) |_, i| {
+            if (spaceRect(s, i).contains(x, y)) return .{ .space = i };
+        };
+        return .none;
+    }
+    if (y < s.top + header_height) {
+        if (layoutRect(s, .grid).contains(x, y)) return .show_grid;
+        if (layoutRect(s, .list).contains(x, y)) return .show_list;
+        return .none;
+    }
+    if (y < s.top + header_height + head_height) {
+        if (newSiteRect(s, u).contains(x, y)) return .new_site;
+        return .none;
+    }
+    if (!contentRect(s).contains(x, y)) return .none;
+    for (0..s.items.len) |i| {
+        if (!itemRect(s, i).contains(x, y)) continue;
+        if (itemMenuRect(s, i).contains(x, y)) return .{ .item_menu = i };
+        return .{ .item = i };
+    }
+    return .none;
+}
+
+/// What a hover on `t` changes on screen (null: nothing of its own, or a menu: redraw all).
+pub fn targetRect(s: State, u: *ui.Ui, t: Target) ?ui.Rect {
+    if (s.menu != null) return null;
+    return switch (t) {
+        .none, .outside_menu, .menu_item => null,
+        .account, .sign_in => accountRect(s),
+        .recents => navRect(s, 0),
+        .local => navRect(s, 1),
+        .space => |i| spaceRect(s, i),
+        .show_grid => layoutRect(s, .grid),
+        .show_list => layoutRect(s, .list),
+        .new_site => newSiteRect(s, u),
+        // Clipped to the content: the item may be half scrolled out.
+        .item, .item_menu => |i| clipTo(itemRect(s, i), contentRect(s)),
+    };
+}
+
+fn clipTo(r: ui.Rect, c: ui.Rect) ?ui.Rect {
+    const x0 = @max(r.x, c.x);
+    const y0 = @max(r.y, c.y);
+    const x1 = @min(r.x + r.w, c.x + c.w);
+    const y1 = @min(r.y + r.h, c.y + c.h);
+    if (x1 <= x0 or y1 <= y0) return null;
+    return .{
+        .x = x0,
+        .y = y0,
+        .w = x1 - x0,
+        .h = y1 - y0,
+    };
+}
+
+// Drawing.
+
+pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
+    try u.rect(.{
+        .x = 0,
+        .y = s.top,
+        .w = s.width,
+        .h = s.height - s.top,
+    }, t.bg, 0);
+    try drawSidebar(u, s, t);
+    try drawHeader(u, s, t);
+    try drawHead(u, s, t);
+    try drawContent(u, s, t);
+    if (s.menu != null) try drawMenu(u, s, t);
+}
+
+fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
+    try u.rect(.{
+        .x = 0,
+        .y = s.top,
+        .w = sidebar_width,
+        .h = s.height - s.top,
+    }, t.sidebar, 0);
+    try u.rect(.{
+        .x = sidebar_width - 1,
+        .y = s.top,
+        .w = 1,
+        .h = s.height - s.top,
+    }, t.border, 0);
+
+    // Publr's logo heads the sidebar, level with the bar: the mark and the name.
+    const mark_size: f32 = 22;
+    const art = mark_size * 24 / mark.units;
+    try u.icon(.{
+        .x = 16,
+        .y = s.top + (header_height - mark_size) / 2,
+        .w = art,
+        .h = art,
+    }, mark.markup, t.text);
+    try u.text(.{
+        .x = 16 + mark_size + 9,
+        .y = s.top,
+        .w = sidebar_width - 64,
+        .h = header_height,
+    }, "Publr", .{
+        .size = 17,
+        .weight = 600,
+        .color = t.text,
+        .tracking = -0.2,
+    });
+    try u.rect(.{
+        .x = 0,
+        .y = s.top + header_height - 1,
+        .w = sidebar_width - 1,
+        .h = 1,
+    }, t.border, 0);
+
+    var buf: [16]u8 = undefined;
+    try navItem(u, t, navRect(s, 0), icons.clock_rewind, "Recent", null, s.view == .recents, same(s.hover, .recents));
+    try navItem(u, t, navRect(s, 1), icons.device_desktop, "On this Mac", std.fmt.bufPrint(&buf, "{d}", .{s.local_count}) catch null, s.view == .local, same(s.hover, .local));
+
+    const label = cloudLabelRect(s);
+    try u.text(.{
+        .x = label.x + 10,
+        .y = label.y + 20,
+        .w = label.w - 20,
+        .h = 16,
+    }, "Cloud", .{
+        .size = 10,
+        .weight = 600,
+        .color = t.text2,
+        .tracking = 1,
+        .upper = true,
+    });
+    if (s.account == .signed_in) {
+        for (s.spaces, 0..) |sp, i| {
+            var cb: [16]u8 = undefined;
+            const selected = switch (s.view) {
+                .space => |k| k == i,
+                else => false,
+            };
+            try navItem(u, t, spaceRect(s, i), icons.globe, sp.name, std.fmt.bufPrint(&cb, "{d}", .{sp.count}) catch null, selected, same(s.hover, .{ .space = i }));
+        }
+    } else {
+        const r = spaceRect(s, 0);
+        try u.text(.{
+            .x = r.x + 10,
+            .y = r.y,
+            .w = r.w - 20,
+            .h = r.h,
+        }, "Sign in to see your Cloud sites", .{
+            .size = 12,
+            .color = t.text2,
+        });
+    }
+    try drawAccount(u, s, t);
+}
+
+/// The sidebar's foot, as the admin keeps the account at its rail's foot.
+fn drawAccount(u: *ui.Ui, s: State, t: *const Theme) !void {
+    try u.rect(.{
+        .x = 0,
+        .y = s.height - account_height,
+        .w = sidebar_width - 1,
+        .h = 1,
+    }, t.border, 0);
+    const a = accountRect(s);
+    switch (s.account) {
+        .signed_in => |name| {
+            if (same(s.hover, .account)) try u.rect(a, t.hover, 8);
+            const dot: ui.Rect = .{
+                .x = a.x + 8,
+                .y = a.y + (a.h - 24) / 2,
+                .w = 24,
+                .h = 24,
+            };
+            try u.rect(dot, t.primary, 12);
+            const initial = if (name.len > 0) name[0..@min(name.len, std.unicode.utf8ByteSequenceLength(name[0]) catch 1)] else "?";
+            try u.text(dot, initial, .{
+                .size = 11,
+                .weight = 600,
+                .color = t.on_primary,
+                .@"align" = .center,
+                .upper = true,
+            });
+            try u.text(.{
+                .x = a.x + 42,
+                .y = a.y,
+                .w = a.w - 42 - 28,
+                .h = a.h,
+            }, name, .{
+                .size = 13,
+                .color = t.text,
+            });
+            try u.icon(.{
+                .x = a.x + a.w - 24,
+                .y = a.y + (a.h - 16) / 2,
+                .w = 16,
+                .h = 16,
+            }, icons.chevron_up, t.text2);
+        },
+        .signed_out => try secondaryButton(u, t, a, "Sign in to Publr Cloud", same(s.hover, .sign_in)),
+        .signing_in => try u.text(a, "Signing in in your browser…", .{
+            .size = 12,
+            .color = t.text2,
+            .@"align" = .center,
+        }),
+    }
+}
+
+fn navItem(u: *ui.Ui, t: *const Theme, r: ui.Rect, icon: []const u8, label: []const u8, count: ?[]const u8, selected: bool, hovered: bool) !void {
+    if (selected) try u.rect(r, t.selected, 8) else if (hovered) try u.rect(r, t.hover, 8);
+    try u.icon(.{
+        .x = r.x + 10,
+        .y = r.y + 6,
+        .w = 16,
+        .h = 16,
+    }, icon, t.text);
+    try u.text(.{
+        .x = r.x + 34,
+        .y = r.y,
+        .w = r.w - 34 - 36,
+        .h = r.h,
+    }, label, .{
+        .size = 13,
+        .color = t.text,
+    });
+    if (count) |c| try u.text(.{
+        .x = r.x + r.w - 42,
+        .y = r.y,
+        .w = 32,
+        .h = r.h,
+    }, c, .{
+        .size = 12,
+        .color = t.text2,
+        .@"align" = .right,
+    });
+}
+
+/// The admin's white button with a grey edge.
+fn secondaryButton(u: *ui.Ui, t: *const Theme, r: ui.Rect, label: []const u8, hovered: bool) !void {
+    try u.box(r, .{
+        .fill = if (hovered) t.hover else t.bg,
+        .border = t.input,
+        .radius = 8,
+    });
+    try u.text(r, label, .{
+        .size = 13,
+        .weight = 500,
+        .color = t.text,
+        .@"align" = .center,
+    });
+}
+
+/// The bar: where you are ("Sites / On this Mac"), and grid or list.
+fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
+    try u.rect(.{
+        .x = sidebar_width,
+        .y = s.top + header_height - 1,
+        .w = s.width - sidebar_width,
+        .h = 1,
+    }, t.border, 0);
+    const crumb: ui.TextStyle = .{
+        .size = 13,
+        .color = t.text2,
+    };
+    const first = u.measure("Sites", crumb);
+    const slash = u.measure("/", crumb);
+    var x = sidebar_width + pad;
+    try u.text(.{
+        .x = x,
+        .y = s.top,
+        .w = first,
+        .h = header_height,
+    }, "Sites", crumb);
+    x += first + 8;
+    try u.text(.{
+        .x = x,
+        .y = s.top,
+        .w = slash,
+        .h = header_height,
+    }, "/", crumb);
+    x += slash + 8;
+    try u.text(.{
+        .x = x,
+        .y = s.top,
+        .w = @max(0, s.width - x - pad - 80),
+        .h = header_height,
+    }, s.title, .{
+        .size = 13,
+        .weight = 500,
+        .color = t.text,
+    });
+
+    // Grid or list: two halves of one bordered button.
+    const g = layoutRect(s, .grid);
+    try u.box(.{
+        .x = g.x,
+        .y = g.y,
+        .w = 64,
+        .h = g.h,
+    }, .{
+        .fill = t.bg,
+        .border = t.input,
+        .radius = 8,
+    });
+    for ([_]Layout{ .grid, .list }) |which| {
+        const r = layoutRect(s, which);
+        const on = s.layout == which;
+        const hovered = same(s.hover, if (which == .grid) Target.show_grid else Target.show_list);
+        const inner: ui.Rect = .{
+            .x = r.x + 3,
+            .y = r.y + 3,
+            .w = r.w - 6,
+            .h = r.h - 6,
+        };
+        if (on) try u.rect(inner, t.selected, 6) else if (hovered) try u.rect(inner, t.hover, 6);
+        try u.icon(centred(r, 16), if (which == .grid) icons.layout_grid else icons.list, if (on or hovered) t.text else t.text2);
+    }
+}
+
+/// The page's title and how many sites it holds, with New site: the admin's page head.
+fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
+    const x = sidebar_width + pad;
+    const w = s.width - x - pad - 140;
+    try u.text(.{
+        .x = x,
+        .y = s.top + header_height + 24,
+        .w = w,
+        .h = 34,
+    }, s.title, .{
+        .size = 28,
+        .weight = 600,
+        .color = t.text,
+        .tracking = -0.56,
+    });
+    var buf: [32]u8 = undefined;
+    const noun = switch (s.view) {
+        .space => if (s.items.len == 1) "project" else "projects",
+        else => if (s.items.len == 1) "site" else "sites",
+    };
+    try u.text(.{
+        .x = x,
+        .y = s.top + header_height + 60,
+        .w = w,
+        .h = 20,
+    }, std.fmt.bufPrint(&buf, "{d} {s}", .{ s.items.len, noun }) catch "", .{
+        .size = 14,
+        .color = t.text2,
+    });
+
+    const n = newSiteRect(s, u);
+    var fill = t.primary;
+    if (same(s.hover, .new_site)) fill.a = 0.86;
+    try u.rect(n, fill, 8);
+    try u.icon(.{
+        .x = n.x + 14,
+        .y = n.y + 10,
+        .w = 16,
+        .h = 16,
+    }, icons.plus, t.on_primary);
+    try u.text(.{
+        .x = n.x + 36,
+        .y = n.y,
+        .w = n.w - 36 - 14,
+        .h = n.h,
+    }, "New site", .{
+        .size = button_text.size,
+        .weight = button_text.weight,
+        .color = t.on_primary,
+    });
+}
+
+fn drawContent(u: *ui.Ui, s: State, t: *const Theme) !void {
+    const c = contentRect(s);
+    if (s.items.len == 0) {
+        const empty = switch (s.view) {
+            .recents => "Sites you open show up here.",
+            .local => "No sites on this Mac yet. New site makes one.",
+            .space => "No projects in this space yet.",
+        };
+        try u.text(.{
+            .x = c.x + pad,
+            .y = c.y + 8,
+            .w = c.w - 2 * pad,
+            .h = 20,
+        }, empty, .{
+            .size = 13,
+            .color = t.text2,
+        });
+        return;
+    }
+    try u.beginClip(c);
+    if (s.layout == .list) try u.rect(.{
+        .x = c.x + pad,
+        .y = c.y - s.scroll,
+        .w = c.w - 2 * pad,
+        .h = 1,
+    }, t.border, 0);
+    for (s.items, 0..) |it, i| {
+        const r = itemRect(s, i);
+        if (r.y + r.h < c.y or r.y > c.y + c.h) continue;
+        const hovered = same(s.hover, .{ .item = i }) or same(s.hover, .{ .item_menu = i });
+        switch (s.layout) {
+            .grid => try drawCard(u, s, t, i, it, hovered),
+            .list => try drawRow(u, s, t, i, it, hovered),
+        }
+    }
+    try u.endClip();
+}
+
+fn drawThumb(u: *ui.Ui, t: *const Theme, r: ui.Rect, it: Item, hovered: bool, radius: f32) !void {
+    try u.box(r, .{
+        .fill = t.hover,
+        .radius = radius,
+    });
+    if (it.thumb) |key| try u.image(r, key, radius) else try u.icon(centred(r, @min(28, r.h / 2)), if (it.kind == .cloud) icons.globe else icons.device_desktop, t.text3);
+    try u.box(r, .{
+        .border = if (hovered) t.input else t.border,
+        .radius = radius,
+    });
+}
+
+fn drawStatus(u: *ui.Ui, t: *const Theme, x: f32, y: f32, w: f32, it: Item) !void {
+    try u.rect(.{
+        .x = x,
+        .y = y + 6,
+        .w = 6,
+        .h = 6,
+    }, if (it.running) t.running else t.stopped, 3);
+    try u.text(.{
+        .x = x + 12,
+        .y = y,
+        .w = w - 12,
+        .h = 18,
+    }, it.detail, .{
+        .size = 12,
+        .color = t.text2,
+    });
+}
+
+fn drawCard(u: *ui.Ui, s: State, t: *const Theme, i: usize, it: Item, hovered: bool) !void {
+    const th = thumbRect(s, i);
+    try drawThumb(u, t, th, it, hovered, 8);
+    try u.text(.{
+        .x = th.x + 1,
+        .y = th.y + th.h + 10,
+        .w = th.w - 2,
+        .h = 18,
+    }, it.name, .{
+        .size = 13,
+        .weight = 500,
+        .color = t.text,
+    });
+    try drawStatus(u, t, th.x + 1, th.y + th.h + 30, th.w - 2, it);
+    if (hovered) try menuButton(u, s, t, i, true);
+}
+
+/// A row as the admin's tables have them: a line under each.
+fn drawRow(u: *ui.Ui, s: State, t: *const Theme, i: usize, it: Item, hovered: bool) !void {
+    const r = itemRect(s, i);
+    if (hovered) try u.rect(r, t.hover, 0);
+    try u.rect(.{
+        .x = r.x,
+        .y = r.y + r.h - 1,
+        .w = r.w,
+        .h = 1,
+    }, t.border, 0);
+    const th = thumbRect(s, i);
+    try drawThumb(u, t, th, it, false, 6);
+    try u.text(.{
+        .x = th.x + th.w + 14,
+        .y = r.y + 9,
+        .w = r.w - th.w - 80,
+        .h = 18,
+    }, it.name, .{
+        .size = 13,
+        .weight = 500,
+        .color = t.text,
+    });
+    try drawStatus(u, t, th.x + th.w + 14, r.y + 29, r.w - th.w - 80, it);
+    if (hovered) try menuButton(u, s, t, i, false);
+}
+
+fn menuButton(u: *ui.Ui, s: State, t: *const Theme, i: usize, on_thumb: bool) !void {
+    const m = itemMenuRect(s, i);
+    const over = same(s.hover, .{ .item_menu = i });
+    try u.box(m, .{
+        .fill = if (over) t.hover else if (on_thumb) t.bg else null,
+        .border = if (on_thumb) t.input else null,
+        .radius = 8,
+    });
+    try u.icon(centred(m, 16), icons.more, t.text);
+}
+
+/// The admin's dropdown: white, a grey edge, the chosen row's blue-grey under the pointer.
+fn drawMenu(u: *ui.Ui, s: State, t: *const Theme) !void {
+    const r = menuRect(s).?;
+    try u.box(r, .{
+        .fill = t.bg,
+        .border = t.border,
+        .radius = 10,
+        .shadow = .{
+            .color = t.shadow,
+            .y = 8,
+            .blur = 24,
+        },
+    });
+    for (s.menu.?.items, 0..) |it, k| {
+        const ir = menuItemRect(s, k);
+        if (it.separator) {
+            try u.rect(.{
+                .x = r.x + 1,
+                .y = ir.y + 4,
+                .w = r.w - 2,
+                .h = 1,
+            }, t.border, 0);
+            continue;
+        }
+        const over = it.enabled and same(s.hover, .{ .menu_item = k });
+        if (over) try u.rect(ir, t.selected, 6);
+        try u.text(.{
+            .x = ir.x + 10,
+            .y = ir.y,
+            .w = ir.w - 20,
+            .h = ir.h,
+        }, it.title, .{
+            .size = 13,
+            .color = if (it.enabled) t.text else t.text3,
+        });
+    }
+}

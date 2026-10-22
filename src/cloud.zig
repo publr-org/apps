@@ -1,0 +1,469 @@
+//! Publr Cloud from Studio: signing in to the person's account (OAuth with PKCE in the
+//! browser, back to Studio through a one-off listener on 127.0.0.1), the account token in
+//! the keychain, and the spaces and projects it lists. Network work runs off the main
+//! thread; what it finds is handed back on the main thread (`changed`).
+//! The calls are Cloud's (`cloud/docs/projects.md`, "Apps signed in to an account").
+
+const std = @import("std");
+const native = @import("native");
+
+const client_id = "publr-studio";
+const keychain_service = "app.publr.studio";
+
+pub const Project = struct {
+    name: []const u8,
+    slug: []const u8,
+    address: []const u8,
+    preview: bool = false,
+    state: []const u8 = "",
+};
+
+pub const Space = struct {
+    slug: []const u8,
+    name: []const u8,
+    pro: bool = false,
+    projects: []const Project = &.{},
+};
+
+const Listing = struct {
+    account: struct {
+        name: []const u8 = "",
+        email: []const u8 = "",
+    } = .{},
+    spaces: []const Space = &.{},
+};
+
+pub const Status = enum {
+    signed_out,
+    /// The browser is open on Cloud's sign-in.
+    signing_in,
+    signed_in,
+};
+
+pub const Cloud = struct {
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    /// The dashboard's address (`https://cloud.publr.app`, `$STUDIO_CLOUD` to change it).
+    base: []const u8,
+    status: Status = .signed_out,
+    token: ?[]u8 = null,
+    account: []const u8 = "",
+    spaces: []const Space = &.{},
+    /// What the listing points into; replaced with each listing.
+    listing: ?std.heap.ArenaAllocator = null,
+    /// A sign-in or listing is under way.
+    busy: bool = false,
+    /// Print the sign-in address instead of opening the browser (tests drive the browser).
+    no_browser: bool = false,
+    /// What went wrong last, for the person.
+    problem: ?[]const u8 = null,
+    changed: *const fn () void,
+
+    pub fn init(gpa: std.mem.Allocator, io: std.Io, base: []const u8, changed: *const fn () void) Cloud {
+        var c: Cloud = .{
+            .gpa = gpa,
+            .io = io,
+            .base = base,
+            .changed = changed,
+        };
+        // Signed in before: list with the kept token.
+        if (native.keychain.get(gpa, keychain_service, base)) |t| {
+            c.token = t;
+            c.status = .signed_in;
+        }
+        return c;
+    }
+
+    /// Lists the spaces and projects again (when signed in).
+    pub fn refresh(self: *Cloud) void {
+        const token = self.token orelse return;
+        if (self.busy) return;
+        self.busy = true;
+        const job = self.gpa.create(Job) catch return;
+        job.* = .{
+            .cloud = self,
+            .token = self.gpa.dupe(u8, token) catch return,
+        };
+        const t = std.Thread.spawn(.{}, Job.list, .{job}) catch return;
+        t.detach();
+    }
+
+    /// Opens Cloud's sign-in in the browser; Studio is signed in when the person allows it.
+    pub fn signIn(self: *Cloud) void {
+        if (self.busy) return;
+        self.busy = true;
+        self.status = .signing_in;
+        self.problem = null;
+        const job = self.gpa.create(Job) catch return;
+        job.* = .{
+            .cloud = self,
+        };
+        const t = std.Thread.spawn(.{}, Job.signIn, .{job}) catch return;
+        t.detach();
+    }
+
+    /// Forgets the token here and signs it out on Cloud (listed under the account's apps).
+    pub fn signOut(self: *Cloud) void {
+        const token = self.token orelse return;
+        if (std.mem.indexOfScalar(u8, token, '.')) |dot| {
+            var body_buf: [128]u8 = undefined;
+            const body = std.fmt.bufPrint(&body_buf, "{{\"id\":\"{s}\"}}", .{token[0..dot]}) catch "";
+            var arena: std.heap.ArenaAllocator = .init(self.gpa);
+            defer arena.deinit();
+            _ = request(self.io, arena.allocator(), self.base, .POST, "/api/device/revoke", .{
+                .payload = body,
+                .content_type = "application/json",
+                .token = token,
+            }) catch {};
+        }
+        native.keychain.remove(keychain_service, self.base);
+        self.gpa.free(token);
+        self.token = null;
+        self.dropListing();
+        self.status = .signed_out;
+    }
+
+    fn dropListing(self: *Cloud) void {
+        if (self.listing) |*a| a.deinit();
+        self.listing = null;
+        self.spaces = &.{};
+        self.account = "";
+    }
+
+    /// Where projects live: the host projects' addresses end in (`publr.app`), from a
+    /// listed project or else the dashboard's own host without `cloud.`.
+    pub fn projectDomain(self: *const Cloud, buf: []u8) []const u8 {
+        for (self.spaces) |sp| for (sp.projects) |p| {
+            const host = hostPart(p.address);
+            if (std.mem.indexOfScalar(u8, host, '.')) |dot| return std.fmt.bufPrint(buf, "{s}", .{host[dot + 1 ..]}) catch "publr.app";
+        };
+        const host = hostPart(self.base);
+        const rest = if (std.mem.startsWith(u8, host, "cloud.")) host["cloud.".len..] else host;
+        return std.fmt.bufPrint(buf, "{s}", .{rest}) catch "publr.app";
+    }
+
+    /// Asks Cloud whether `slug` is free; `done` gets the answer on the main thread.
+    pub fn checkAddress(self: *Cloud, slug: []const u8, done: *const fn (slug: []const u8, answer: Availability) void) void {
+        const token = self.token orelse return;
+        const job = self.gpa.create(Check) catch return;
+        job.* = .{
+            .cloud = self,
+            .slug = self.gpa.dupe(u8, slug) catch return,
+            .token = self.gpa.dupe(u8, token) catch return,
+            .done = done,
+        };
+        const t = std.Thread.spawn(.{}, Check.run, .{job}) catch return;
+        t.detach();
+    }
+
+    /// The dashboard page for the account's own settings (apps signed in, sign out).
+    pub fn accountPage(self: *const Cloud, buf: []u8) [:0]const u8 {
+        return std.fmt.bufPrintZ(buf, "{s}/account", .{self.base}) catch "";
+    }
+};
+
+fn hostPart(address: []const u8) []const u8 {
+    const h = if (std.mem.indexOf(u8, address, "://")) |i| address[i + 3 ..] else address;
+    return if (std.mem.indexOfScalar(u8, h, '/')) |s| h[0..s] else h;
+}
+
+pub const Availability = enum {
+    available,
+    taken,
+    reserved,
+    invalid,
+    /// Cloud could not be asked.
+    unknown,
+};
+
+const Check = struct {
+    cloud: *Cloud,
+    slug: []u8,
+    token: []u8,
+    answer: Availability = .unknown,
+    done: *const fn (slug: []const u8, answer: Availability) void,
+
+    fn run(self: *Check) void {
+        var arena: std.heap.ArenaAllocator = .init(self.cloud.gpa);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const path = std.fmt.allocPrint(a, "/api/cloud/check_address?slug={s}", .{self.slug}) catch "";
+        if (request(self.cloud.io, a, self.cloud.base, .GET, path, .{
+            .token = self.token,
+        })) |reply| {
+            const Answer = struct {
+                available: bool = false,
+                reason: ?[]const u8 = null,
+            };
+            if (reply.status == .ok) if (std.json.parseFromSliceLeaky(Answer, a, reply.body, .{
+                .ignore_unknown_fields = true,
+            })) |ans| {
+                self.answer = if (ans.available) .available else if (ans.reason) |r| std.meta.stringToEnum(Availability, r) orelse .taken else .taken;
+            } else |_| {};
+        } else |_| {}
+        native.runOnMain(self, finish);
+    }
+
+    fn finish(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *Check = @ptrCast(@alignCast(ctx));
+        const gpa = self.cloud.gpa;
+        self.done(self.slug, self.answer);
+        gpa.free(self.slug);
+        gpa.free(self.token);
+        gpa.destroy(self);
+    }
+};
+
+/// One piece of network work, off the main thread; its result is applied on the main one.
+const Job = struct {
+    cloud: *Cloud,
+    token: ?[]u8 = null,
+    arena: ?std.heap.ArenaAllocator = null,
+    listing: ?Listing = null,
+    /// 403 from the listing: the token was signed out elsewhere.
+    signed_out: bool = false,
+    problem: ?[]const u8 = null,
+
+    fn list(self: *Job) void {
+        self.fetch();
+        native.runOnMain(self, apply);
+    }
+
+    fn fetch(self: *Job) void {
+        var arena: std.heap.ArenaAllocator = .init(self.cloud.gpa);
+        const a = arena.allocator();
+        const reply = request(self.cloud.io, a, self.cloud.base, .GET, "/api/cloud/spaces", .{
+            .token = self.token.?,
+        }) catch {
+            self.problem = "Publr Cloud could not be reached.";
+            arena.deinit();
+            return;
+        };
+        if (reply.status == .forbidden or reply.status == .unauthorized) {
+            self.signed_out = true;
+            arena.deinit();
+            return;
+        }
+        if (reply.status != .ok) {
+            self.problem = "Publr Cloud did not list your sites.";
+            arena.deinit();
+            return;
+        }
+        self.listing = std.json.parseFromSliceLeaky(Listing, a, reply.body, .{
+            .ignore_unknown_fields = true,
+            .allocate = .alloc_always,
+        }) catch {
+            self.problem = "Publr Cloud answered something Studio does not understand.";
+            arena.deinit();
+            return;
+        };
+        self.arena = arena;
+    }
+
+    fn signIn(self: *Job) void {
+        self.token = authorize(self.cloud) catch |e| blk: {
+            self.problem = switch (e) {
+                error.Denied => "Sign-in was cancelled.",
+                error.TimedOut => "Sign-in took too long. Try again.",
+                else => "Signing in to Publr Cloud did not work.",
+            };
+            break :blk null;
+        };
+        if (self.token != null) self.fetch();
+        native.runOnMain(self, apply);
+    }
+
+    /// On the main thread: the cloud takes what the job found.
+    fn apply(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *Job = @ptrCast(@alignCast(ctx));
+        const c = self.cloud;
+        const gpa = c.gpa;
+        defer gpa.destroy(self);
+        c.busy = false;
+        c.problem = self.problem;
+        if (self.signed_out) {
+            if (self.token) |t| gpa.free(t);
+            if (c.token) |t| gpa.free(t);
+            c.token = null;
+            native.keychain.remove(keychain_service, c.base);
+            c.dropListing();
+            c.status = .signed_out;
+            return c.changed();
+        }
+        if (self.token) |t| {
+            // A new sign-in, or the same token listed again.
+            if (c.token == null or !std.mem.eql(u8, c.token.?, t)) {
+                if (c.token) |old| gpa.free(old);
+                c.token = t;
+                _ = native.keychain.set(keychain_service, c.base, t);
+                native.activate();
+            } else gpa.free(t);
+        }
+        if (self.listing) |l| {
+            c.dropListing();
+            c.listing = self.arena;
+            c.spaces = l.spaces;
+            c.account = if (l.account.name.len > 0) l.account.name else l.account.email;
+        }
+        c.status = if (c.token != null) .signed_in else .signed_out;
+        c.changed();
+    }
+};
+
+/// The OAuth flow for a native app (RFC 8252, PKCE): a listener on a free 127.0.0.1 port,
+/// the browser on Cloud's authorize page, the code it sends back exchanged for the token.
+fn authorize(c: *Cloud) ![]u8 {
+    var arena: std.heap.ArenaAllocator = .init(c.gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const io = c.io;
+
+    var verifier_bytes: [32]u8 = undefined;
+    io.random(&verifier_bytes);
+    var state_bytes: [16]u8 = undefined;
+    io.random(&state_bytes);
+    const b64 = std.base64.url_safe_no_pad.Encoder;
+    var verifier_buf: [64]u8 = undefined;
+    const verifier = b64.encode(&verifier_buf, &verifier_bytes);
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(verifier, &digest, .{});
+    var challenge_buf: [64]u8 = undefined;
+    const challenge = b64.encode(&challenge_buf, &digest);
+    var state_buf: [32]u8 = undefined;
+    const state = b64.encode(&state_buf, &state_bytes);
+
+    const address = try std.Io.net.IpAddress.parse("127.0.0.1", 0);
+    var listener = try address.listen(io, .{
+        .reuse_address = true,
+    });
+    defer listener.deinit(io);
+    const port = listener.socket.address.getPort();
+    const redirect = try std.fmt.allocPrint(a, "http://127.0.0.1:{d}/callback", .{port});
+
+    const url = try std.fmt.allocPrintSentinel(a, "{s}/oauth/authorize?response_type=code&client_id={s}&redirect_uri={f}&code_challenge={s}&code_challenge_method=S256&state={s}", .{
+        c.base,
+        client_id,
+        std.fmt.alt(std.Uri.Component{ .raw = redirect }, .formatEscaped),
+        challenge,
+        state,
+    }, 0);
+    if (c.no_browser) std.debug.print("studio: sign in at {s}\n", .{url}) else native.openInBrowser(url);
+
+    // The browser comes back once: the code, or the person's no.
+    const code = try waitForCode(io, a, &listener, state);
+
+    const form = try std.fmt.allocPrint(a, "grant_type=authorization_code&code={s}&code_verifier={s}&client_id={s}&redirect_uri={f}", .{
+        code,
+        verifier,
+        client_id,
+        std.fmt.alt(std.Uri.Component{ .raw = redirect }, .formatEscaped),
+    });
+    const reply = try request(io, a, c.base, .POST, "/oauth/token", .{
+        .payload = form,
+        .content_type = "application/x-www-form-urlencoded",
+    });
+    if (reply.status != .ok) return error.Refused;
+    const Token = struct {
+        access_token: []const u8,
+    };
+    const tok = try std.json.parseFromSliceLeaky(Token, a, reply.body, .{
+        .ignore_unknown_fields = true,
+    });
+    return c.gpa.dupe(u8, tok.access_token);
+}
+
+const back_page =
+    \\<!doctype html><meta charset=utf-8><title>Publr Studio</title>
+    \\<body style="margin:0;height:100vh;display:grid;place-items:center;font:15px -apple-system,system-ui,sans-serif;color:#222">
+    \\<div style="text-align:center"><p style="font-size:18px;font-weight:600;margin:0 0 8px">{s}</p><p style="margin:0;color:#777">{s}</p></div>
+;
+
+fn waitForCode(io: std.Io, a: std.mem.Allocator, listener: *std.Io.net.Server, state: []const u8) ![]const u8 {
+    // Connections that are not the callback (a favicon) are answered and waited past.
+    var tries: usize = 0;
+    while (tries < 8) : (tries += 1) {
+        const stream = try listener.accept(io);
+        defer stream.close(io);
+        var in_buf: [8192]u8 = undefined;
+        var out_buf: [2048]u8 = undefined;
+        var reader = stream.reader(io, &in_buf);
+        var writer = stream.writer(io, &out_buf);
+        const line = reader.interface.takeDelimiterExclusive('\n') catch continue;
+        var parts = std.mem.tokenizeScalar(u8, std.mem.trimEnd(u8, line, "\r"), ' ');
+        _ = parts.next();
+        const target = parts.next() orelse "/";
+        if (!std.mem.startsWith(u8, target, "/callback?")) {
+            try writer.interface.writeAll("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            try writer.interface.flush();
+            continue;
+        }
+        var code: ?[]const u8 = null;
+        var got_state: []const u8 = "";
+        var denied = false;
+        var pairs = std.mem.tokenizeScalar(u8, target["/callback?".len..], '&');
+        while (pairs.next()) |pair| {
+            const eq = std.mem.indexOfScalar(u8, pair, '=') orelse continue;
+            const k = pair[0..eq];
+            const v = pair[eq + 1 ..];
+            if (std.mem.eql(u8, k, "code")) code = try a.dupe(u8, v);
+            if (std.mem.eql(u8, k, "state")) got_state = v;
+            if (std.mem.eql(u8, k, "error")) denied = true;
+        }
+        const ok = code != null and std.mem.eql(u8, got_state, state);
+        const body = try std.fmt.allocPrint(a, back_page, if (ok)
+            .{ "Signed in to Publr Studio", "You can close this tab and go back to Studio." }
+        else
+            .{ "Sign-in cancelled", "Studio is still signed out. You can close this tab." });
+        try writer.interface.print("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}", .{ body.len, body });
+        try writer.interface.flush();
+        if (denied or !ok) return error.Denied;
+        return code.?;
+    }
+    return error.TimedOut;
+}
+
+const Reply = struct {
+    status: std.http.Status,
+    body: []const u8,
+};
+
+const RequestOptions = struct {
+    payload: ?[]const u8 = null,
+    content_type: ?[]const u8 = null,
+    /// Sent as `Authorization: Bearer`; none for a call made before signing in.
+    token: ?[]const u8 = null,
+};
+
+fn request(io: std.Io, a: std.mem.Allocator, base: []const u8, method: std.http.Method, path: []const u8, options: RequestOptions) !Reply {
+    var client: std.http.Client = .{
+        .allocator = a,
+        .io = io,
+    };
+    defer client.deinit();
+    var body: std.Io.Writer.Allocating = .init(a);
+    const url = try std.fmt.allocPrint(a, "{s}{s}", .{ base, path });
+    const bearer = if (options.token) |t| try std.fmt.allocPrint(a, "Bearer {s}", .{t}) else "";
+    const auth: []const std.http.Header = if (options.token != null) &.{.{
+        .name = "Authorization",
+        .value = bearer,
+    }} else &.{};
+    const result = try client.fetch(.{
+        .location = .{
+            .url = url,
+        },
+        .method = method,
+        .payload = options.payload,
+        .keep_alive = false,
+        .headers = .{
+            .content_type = if (options.content_type) |ct| .{
+                .override = ct,
+            } else .default,
+        },
+        .extra_headers = auth,
+        .response_writer = &body.writer,
+    });
+    return .{
+        .status = result.status,
+        .body = body.written(),
+    };
+}
