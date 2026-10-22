@@ -1,0 +1,24 @@
+.{
+    .name = .publr_native,
+    .version = "0.0.0",
+    .fingerprint = 0xf50dac7002d242e7,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .publr_icons = .{
+            .path = "../icons",
+        },
+        .publr_engine = .{
+            .path = "../publr-design/engine",
+        },
+        .wgpu_macos_aarch64 = .{
+            .url = "https://github.com/gfx-rs/wgpu-native/releases/download/v29.0.1.1/wgpu-macos-aarch64-release.zip",
+            .hash = "N-V-__8AAAUNfQJBPHGd3KMhFvl4WLpzHDx9rFkwSf2rFVhr",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "examples",
+    },
+}
