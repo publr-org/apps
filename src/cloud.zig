@@ -321,6 +321,8 @@ const Create = struct {
 pub const SignedOn = struct {
     slug: []const u8,
     url: [:0]const u8 = "",
+    /// The one-time token itself, for a sign-in other than the tab's (`publr login --sign-on`).
+    token: []const u8 = "",
     problem: ?[]const u8 = null,
 };
 
@@ -363,6 +365,7 @@ const SignOn = struct {
             if (reply.status == .ok and answer.token.len > 0) {
                 const scheme = if (std.mem.startsWith(u8, self.cloud.base, "http://")) "http" else "https";
                 self.signed.problem = null;
+                self.signed.token = answer.token;
                 self.signed.url = std.fmt.allocPrintSentinel(a, "{s}://{s}.{s}/auth/sign-on?token={s}&return=%2Fadmin", .{
                     scheme,
                     answer.slug,

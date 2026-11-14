@@ -9,6 +9,7 @@ const native = @import("native");
 const ui = @import("ui");
 const bar = @import("bar.zig");
 const home = @import("home.zig");
+const syncing = @import("sync.zig");
 const themes = @import("theme.zig");
 const Sites = @import("sites.zig").Sites;
 const Thumbs = @import("thumbs.zig").Thumbs;
@@ -41,8 +42,9 @@ const Action = struct {
     const start = 6;
     const trash = 7;
     const view_live_local = 8;
-    const cloud_admin = 9;
-    const deploy_changes = 10;
+    const send_changes = 10;
+    const open_review = 15;
+    const preview_changes = 14;
     // A Cloud project's.
     const open_project = 11;
     const view_live = 12;
@@ -200,6 +202,16 @@ pub fn main(init: std.process.Init) !void {
     cloud = .init(gpa, io, env.get("STUDIO_CLOUD") orelse "https://cloud.publr.app", cloudChanged);
     cloud.no_browser = env.get("STUDIO_NO_BROWSER") != null;
     cloud.refresh();
+    syncing.init(.{
+        .gpa = gpa,
+        .io = io,
+        .env = env,
+        .publr = publrPath(gpa),
+        .p_path = sites.p_path,
+        .sign_on = syncSignOn,
+        .changed = syncChanged,
+        .running = siteRunning,
+    });
     u = try ui.Ui.create(gpa);
     gpu = try native.gpu.Gpu.init();
     window = try native.Window.create(.{
@@ -393,24 +405,51 @@ fn addUnlinked(a: std.mem.Allocator, only: ?usize) void {
 
 fn addLocal(a: std.mem.Allocator, name: []const u8) void {
     const s = sites.find(name) orelse return;
-    // A deployed folder is the project on Cloud, its working copy here: where it is live.
-    // No-break spaces: the line is cut at its end when the address is long, never wrapped
-    // at the dot, which would leave only "Running ·…".
-    const deployed = s.live.len > 0;
-    const detail = if (deployed)
-        std.fmt.allocPrint(a, "{s}\u{00a0}\u{00b7}\u{00a0}On this Mac", .{hostOf(s.live)}) catch return
-    else
-        std.fmt.allocPrint(a, "On this Mac\u{00a0}\u{00b7}\u{00a0}{s}", .{if (s.running) "Running" else "Stopped"}) catch return;
+    // A folder linked to a Cloud project is that project: one card, marked as both, saying
+    // whether this Mac is in step with Cloud. `sync.zig` keeps the folder so.
+    const linked = s.live.len > 0;
+    var state: syncing.State = .checking;
+    if (linked) {
+        var db: [512]u8 = undefined;
+        syncing.check(s.name, siteDir(&db, s.name), s.live, nowMs(), false);
+        state = syncing.stateOf(s.name) orelse .checking;
+    }
+    const detail = if (linked) state.text() else if (s.running) "Running" else "Stopped";
     var kb: [256]u8 = undefined;
     const thumb = if (thumbs.key(&kb, s.name)) |k| a.dupe(u8, k) catch null else null;
     items.append(gpa, .{
         .name = s.name,
         .detail = detail,
-        .kind = if (deployed) .both else .local,
-        .running = s.running,
+        .kind = if (linked) .both else .local,
+        .running = if (linked) state != .failed else s.running,
+        .changed = linked and (state == .unsent or state == .waiting),
         .thumb = thumb,
     }) catch return;
     item_refs.append(gpa, .{ .local = s.name }) catch {};
+}
+
+fn siteDir(buf: []u8, name: []const u8) []const u8 {
+    return std.fmt.bufPrint(buf, "{s}/publr-sites/{s}", .{ home_dir, name }) catch "";
+}
+
+fn siteRunning(name: []const u8) bool {
+    const s = sites.find(name) orelse return false;
+    return s.running;
+}
+
+/// A folder's sync needs a sign-on token for its project; Cloud gives one when signed in.
+fn syncSignOn(slug: []const u8) void {
+    if (cloud.token == null) return syncing.signedOn(slug, null);
+    cloud.signOnTo(slug, syncSignedOn);
+}
+
+fn syncSignedOn(signed: @import("cloud.zig").SignedOn) void {
+    syncing.signedOn(signed.slug, if (signed.problem == null and signed.token.len > 0) signed.token else null);
+}
+
+fn syncChanged() void {
+    sites.refresh();
+    redrawAll();
 }
 
 /// How many projects each filter holds, each once.
@@ -599,28 +638,32 @@ var menu_items: [12]home.MenuItem = undefined;
 fn siteMenu(name: []const u8) []const home.MenuItem {
     const s = sites.find(name) orelse return &.{};
     if (s.live.len > 0) {
-        // Deployed: the Cloud project is the site; this folder is its working copy.
+        // Linked: the Cloud project is the site; this folder is its working copy, kept in
+        // step by Studio. Work made here goes up when the person sends it.
+        const state = syncing.stateOf(name) orelse .checking;
         const linked = [_]home.MenuItem{
             .{
                 .title = "Open",
                 .tag = Action.open,
             },
             .{
-                .title = "View site",
-                .tag = Action.view_site,
+                .title = "Send changes to Cloud",
+                .tag = Action.send_changes,
+                .enabled = state == .unsent,
+            },
+            .{
+                .title = "Open review",
+                .tag = Action.open_review,
+                .enabled = syncing.reviewOf(name) != null,
+            },
+            .{
+                .title = "Open copy on this Mac",
+                .tag = Action.preview_changes,
+                .enabled = state == .unsent or state == .waiting,
             },
             .{
                 .title = "View live site",
                 .tag = Action.view_live_local,
-            },
-            .{
-                .title = "Open Cloud admin",
-                .tag = Action.cloud_admin,
-            },
-            .{
-                .title = "Deploy changes (coming soon)",
-                .tag = Action.deploy_changes,
-                .enabled = false,
             },
             .{
                 .separator = true,
@@ -629,18 +672,11 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
                 .title = "Show in Finder",
                 .tag = Action.finder,
             },
-            if (s.running) .{
-                .title = "Stop",
-                .tag = Action.stop,
-            } else .{
-                .title = "Start",
-                .tag = Action.start,
-            },
             .{
                 .separator = true,
             },
             .{
-                .title = "Move to Trash",
+                .title = "Remove from this Mac",
                 .tag = Action.trash,
             },
         };
@@ -806,7 +842,7 @@ fn clickHome(t: home.Target, m: native.event.Mouse) void {
                     .y = @floatCast(m.y),
                 };
             } else switch (r) {
-                .local => |name| openSite(name),
+                .local => |name| openLocal(name),
                 .cloud => |c| openProject(c.space, c.project),
             }
         },
@@ -878,6 +914,24 @@ fn openProjectAdmin(name: []const u8, address: []const u8) void {
     cloud.signOnTo(host[0..dot], signedOn);
 }
 
+/// The page where the folder's sent work is reviewed, in the project's tab, signed in.
+fn openReview(name: []const u8, address: []const u8) void {
+    const review = syncing.reviewOf(name) orelse return;
+    const path = pathOf(review);
+    for (tabs.items, 0..) |t, i| if (t.url != null and std.mem.eql(u8, t.name, name)) {
+        t.web.loadUrl(frame_arena.allocator().dupeZ(u8, review) catch return);
+        return showTab(i);
+    };
+    sign_on_return = gpa.dupe(u8, path) catch null;
+    openProjectAdmin(name, address);
+}
+
+fn pathOf(url: []const u8) []const u8 {
+    const host_at = if (std.mem.indexOf(u8, url, "://")) |i| i + 3 else 0;
+    const slash = std.mem.indexOfScalarPos(u8, url, host_at, '/') orelse return "/admin";
+    return url[slash..];
+}
+
 /// The project's tab, signed in: its sign-on address, or its admin when Cloud gave none
 /// (which asks for the dashboard's sign-in).
 fn signedOn(signed: @import("cloud.zig").SignedOn) void {
@@ -888,9 +942,33 @@ fn signedOn(signed: @import("cloud.zig").SignedOn) void {
         if (!std.mem.eql(u8, host[0..at], signed.slug)) continue;
         if (signed.problem) |pr| std.debug.print("studio: signing in to {s}: {s}\n", .{ signed.slug, pr });
         const admin = frame_arena.allocator().dupeZ(u8, url) catch return;
-        t.web.loadUrl(if (signed.problem == null) signed.url else admin);
+        t.web.loadUrl(if (signed.problem == null) withReturn(signed.url) else admin);
         return;
     }
+}
+
+/// Where the next sign-on lands instead of the admin's home (`openReview`).
+var sign_on_return: ?[]u8 = null;
+
+/// `url` (a sign-on address) landing on `sign_on_return`, which it uses up.
+fn withReturn(url: [:0]const u8) [:0]const u8 {
+    const path = sign_on_return orelse return url;
+    defer {
+        gpa.free(path);
+        sign_on_return = null;
+    }
+    const at = std.mem.indexOf(u8, url, "&return=") orelse return url;
+    const a = frame_arena.allocator();
+    var out: std.ArrayList(u8) = .empty;
+    out.appendSlice(a, url[0 .. at + "&return=".len]) catch return url;
+    for (path) |c| {
+        if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.') {
+            out.append(a, c) catch return url;
+        } else {
+            out.print(a, "%{X:0>2}", .{c}) catch return url;
+        }
+    }
+    return out.toOwnedSliceSentinel(a, 0) catch url;
 }
 
 fn setView(v: home.View) void {
@@ -899,10 +977,21 @@ fn setView(v: home.View) void {
     sites.refresh();
 }
 
+/// A folder on Home opened: a linked one is its Cloud project, opened in Cloud's admin
+/// (this Mac keeps the folder in step); any other its own admin.
+fn openLocal(name: []const u8) void {
+    const s = sites.find(name) orelse return;
+    if (s.live.len > 0) return openProjectAdmin(name, s.live);
+    openSite(name);
+}
+
 fn act(name: []const u8, tag: u32) void {
     const s = sites.find(name) orelse return;
     switch (tag) {
-        Action.open => openSite(name),
+        Action.open => openLocal(name),
+        Action.send_changes => syncing.send(name),
+        Action.open_review => openReview(name, s.live),
+        Action.preview_changes => openSite(name),
         Action.view_site => {
             var buf: [256]u8 = undefined;
             native.openInBrowser(std.fmt.bufPrintZ(&buf, "{s}", .{s.address}) catch return);
@@ -916,15 +1005,10 @@ fn act(name: []const u8, tag: u32) void {
             var buf: [512]u8 = undefined;
             native.openInBrowser(std.fmt.bufPrintZ(&buf, "{s}", .{s.live}) catch return);
         },
-        Action.cloud_admin => {
-            // Its own tab, beside the working copy's, signed in as the dashboard signs in.
-            var buf: [256]u8 = undefined;
-            openProjectAdmin(std.fmt.bufPrint(&buf, "{s} \u{00b7} Cloud", .{name}) catch return, s.live);
-        },
         Action.stop => sites.command(&.{ "stop", name }),
         Action.start => sites.command(&.{ "start", name }),
         Action.trash => {
-            for (tabs.items, 0..) |t, i| if (std.mem.eql(u8, t.name, name)) {
+            for (tabs.items, 0..) |t, i| if (t.url == null and std.mem.eql(u8, t.name, name)) {
                 closeTab(i);
                 break;
             };
@@ -1518,7 +1602,8 @@ fn showTab(i: usize) void {
 
 fn openSite(name: []const u8) void {
     rememberRecent(name);
-    for (tabs.items, 0..) |t, i| if (std.mem.eql(u8, t.name, name)) return showTab(i);
+    // A folder linked to Cloud has two tabs of the same name: this one is the local admin's.
+    for (tabs.items, 0..) |t, i| if (t.url == null and std.mem.eql(u8, t.name, name)) return showTab(i);
     const web = window.addWebView() catch return;
     web.loadHtml(starting_page);
     const owned = gpa.dupe(u8, name) catch return;
@@ -1631,7 +1716,9 @@ fn saveOpenSites() void {
     if (timing_site != null) return;
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(gpa);
+    // Only local sites' tabs come back as they were; a Cloud tab needs a fresh sign-on.
     for (tabs.items) |t| {
+        if (t.url != null) continue;
         out.appendSlice(gpa, t.name) catch return;
         out.append(gpa, '\n') catch return;
     }

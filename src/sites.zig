@@ -60,7 +60,9 @@ pub const Sites = struct {
         const a = arena.allocator();
         const home = self.env.get("HOME") orelse return;
         const path = std.fs.path.join(a, &.{ home, "publr-sites", site.name, "cloud.json" }) catch return;
-        const bytes = std.Io.Dir.cwd().readFileAlloc(self.io, path, a, .limited(64 * 1024)) catch return;
+        const bytes = std.Io.Dir.cwd().readFileAlloc(self.io, path, a, .limited(64 * 1024)) catch {
+            return self.readClone(a, home, site);
+        };
         const Link = struct {
             address: []const u8 = "",
             admin: []const u8 = "",
@@ -70,6 +72,19 @@ pub const Sites = struct {
         }) catch return;
         site.live = self.gpa.dupe(u8, link.address) catch "";
         site.live_admin = self.gpa.dupe(u8, link.admin) catch "";
+    }
+
+    /// A folder cloned from a site (`publr clone`) is that site's working copy too.
+    fn readClone(self: *Sites, a: std.mem.Allocator, home: []const u8, site: *Site) void {
+        const path = std.fs.path.join(a, &.{ home, "publr-sites", site.name, ".publr", "clone.json" }) catch return;
+        const bytes = std.Io.Dir.cwd().readFileAlloc(self.io, path, a, .limited(64 * 1024)) catch return;
+        const Link = struct {
+            site: []const u8 = "",
+        };
+        const link = std.json.parseFromSliceLeaky(Link, a, bytes, .{
+            .ignore_unknown_fields = true,
+        }) catch return;
+        if (link.site.len > 0) site.live = self.gpa.dupe(u8, link.site) catch "";
     }
 
     pub fn find(self: *const Sites, name: []const u8) ?Site {

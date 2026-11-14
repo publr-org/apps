@@ -44,10 +44,12 @@ pub const Kind = enum {
 /// A project as Home shows it.
 pub const Item = struct {
     name: []const u8,
-    /// "On this Mac · Running", "ada.publr.app · Live", "ada.publr.app · On this Mac".
+    /// "Running", "ada.publr.app · Live", "Up to date": where it is shows as its marks.
     detail: []const u8,
     kind: Kind,
     running: bool,
+    /// Work of its own waiting to reach Cloud: the dot says so.
+    changed: bool = false,
     /// Its thumbnail's name in the `ui` (null: none yet).
     thumb: ?[]const u8 = null,
 };
@@ -789,6 +791,44 @@ fn drawThumb(u: *ui.Ui, t: *const Theme, r: ui.Rect, it: Item, hovered: bool, ra
         .border = if (hovered) t.input else t.border,
         .radius = radius,
     });
+    if (r.h >= 60) try drawMarks(u, t, r.x + 8, r.y + r.h - marks_size - 8, it.kind);
+}
+
+const marks_size: f32 = 22;
+
+fn marksOf(kind: Kind) []const []const u8 {
+    return switch (kind) {
+        .local => &.{icons.device_desktop},
+        .cloud => &.{icons.globe},
+        .both => &.{ icons.globe, icons.device_desktop },
+    };
+}
+
+fn marksWidth(kind: Kind) f32 {
+    return 6 + marks_size * @as(f32, @floatFromInt(marksOf(kind).len));
+}
+
+/// Where a project is: Cloud, this Mac, or both, in a small box at `x`, `y`.
+fn drawMarks(u: *ui.Ui, t: *const Theme, x: f32, y: f32, kind: Kind) !void {
+    const marks = marksOf(kind);
+    const size = marks_size;
+    const box: ui.Rect = .{
+        .x = x,
+        .y = y,
+        .w = marksWidth(kind),
+        .h = size,
+    };
+    try u.box(box, .{
+        .fill = t.bg,
+        .border = t.border,
+        .radius = 6,
+    });
+    for (marks, 0..) |glyph, k| try u.icon(centred(.{
+        .x = box.x + 3 + size * @as(f32, @floatFromInt(k)),
+        .y = box.y,
+        .w = size,
+        .h = size,
+    }, 14), glyph, t.text2);
 }
 
 fn drawStatus(u: *ui.Ui, t: *const Theme, x: f32, y: f32, w: f32, it: Item) !void {
@@ -797,7 +837,7 @@ fn drawStatus(u: *ui.Ui, t: *const Theme, x: f32, y: f32, w: f32, it: Item) !voi
         .y = y + 6,
         .w = 6,
         .h = 6,
-    }, if (it.running) t.running else t.stopped, 3);
+    }, if (it.changed) t.preview else if (it.running) t.running else t.stopped, 3);
     try u.text(.{
         .x = x + 12,
         .y = y,
@@ -848,7 +888,8 @@ fn drawRow(u: *ui.Ui, s: State, t: *const Theme, i: usize, it: Item, hovered: bo
         .weight = 500,
         .color = t.text,
     });
-    try drawStatus(u, t, th.x + th.w + 14, r.y + 29, r.w - th.w - 80, it);
+    try drawStatus(u, t, th.x + th.w + 14, r.y + 29, r.w - th.w - 80 - marksWidth(it.kind), it);
+    try drawMarks(u, t, r.x + r.w - 56 - marksWidth(it.kind), r.y + (r.h - marks_size) / 2, it.kind);
     if (hovered) try menuButton(u, s, t, i, false);
 }
 
