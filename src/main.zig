@@ -106,6 +106,8 @@ var menu: ?struct {
 /// The sheet open over Home, if any.
 var open_sheet: ?enum {
     new_site,
+    /// New project, in the Cloud space open.
+    new_project,
     deploy,
     /// The site is live: where, and its buttons.
     deployed,
@@ -130,6 +132,8 @@ var deploy_after_sign_in: ?[]const u8 = null;
 var sheet_hover: sheet.Target = .none;
 /// What the sheet's work said went wrong, or what it is doing.
 var sheet_error: ?[]const u8 = null;
+/// Cloud's reason a project was not made, kept for `sheet_error`.
+var problem_text: []const u8 = "";
 var sheet_busy: ?[]const u8 = null;
 var name_field: ui.TextField = undefined;
 /// Site names, most recently opened first.
@@ -775,19 +779,41 @@ fn actAccount(tag: u32) void {
 /// person signs in to it (Cloud's sign-on for Studio comes later).
 fn openProject(space: usize, k: usize) void {
     const p = cloud.spaces[space].projects[k];
-    for (tabs.items, 0..) |t, i| if (t.url != null and std.mem.eql(u8, t.name, p.name)) return showTab(i);
-    const host = hostOf(p.address);
+    openProjectAdmin(p.name, p.address);
+}
+
+/// A Cloud project's admin in a tab of its own (its tab again when open): `<slug>--admin`,
+/// signed in as the member through a one-time sign-on Cloud gives Studio, so the tab never
+/// asks for the dashboard's password.
+fn openProjectAdmin(name: []const u8, address: []const u8) void {
+    for (tabs.items, 0..) |t, i| if (t.url != null and std.mem.eql(u8, t.name, name)) return showTab(i);
+    const host = hostOf(address);
     const dot = std.mem.indexOfScalar(u8, host, '.') orelse return;
-    const scheme = if (std.mem.startsWith(u8, p.address, "http://")) "http" else "https";
+    const scheme = if (std.mem.startsWith(u8, address, "http://")) "http" else "https";
     const url = std.fmt.allocPrintSentinel(gpa, "{s}://{s}--admin{s}/admin", .{ scheme, host[0..dot], host[dot..] }, 0) catch return;
     const web = window.addWebView() catch return;
-    web.loadUrl(url);
     tabs.append(gpa, .{
-        .name = gpa.dupe(u8, p.name) catch return,
+        .name = gpa.dupe(u8, name) catch return,
         .web = web,
         .url = url,
     }) catch return;
     showTab(tabs.items.len - 1);
+    cloud.signOnTo(host[0..dot], signedOn);
+}
+
+/// The project's tab, signed in: its sign-on address, or its admin when Cloud gave none
+/// (which asks for the dashboard's sign-in).
+fn signedOn(signed: @import("cloud.zig").SignedOn) void {
+    for (tabs.items) |t| {
+        const url = t.url orelse continue;
+        const host = hostOf(url);
+        const at = std.mem.indexOf(u8, host, "--admin") orelse continue;
+        if (!std.mem.eql(u8, host[0..at], signed.slug)) continue;
+        if (signed.problem) |pr| std.debug.print("studio: signing in to {s}: {s}\n", .{ signed.slug, pr });
+        const admin = frame_arena.allocator().dupeZ(u8, url) catch return;
+        t.web.loadUrl(if (signed.problem == null) signed.url else admin);
+        return;
+    }
 }
 
 fn setView(v: home.View) void {
@@ -910,7 +936,7 @@ fn timeHome() void {
 
 fn openNewSite() void {
     if (active != null) showHome();
-    open_sheet = .new_site;
+    open_sheet = if (view == .space) .new_project else .new_site;
     name_field.set("");
     sheet_error = null;
     sheet_busy = null;
@@ -939,6 +965,7 @@ fn nameProblem(name: []const u8) ?[]const u8 {
 fn sheetState(fields: *[1]sheet.Field) sheet.State {
     if (open_sheet == .deploy) return deployState(fields);
     if (open_sheet == .deployed) return deployedState();
+    if (open_sheet == .new_project) return projectState(fields);
     const size = window.size();
     const name = name_field.value();
     const problem = nameProblem(name);
@@ -1022,6 +1049,7 @@ fn fieldChanged() void {
 fn primaryAction() void {
     switch (open_sheet orelse return) {
         .new_site => createSite(),
+        .new_project => createProject(),
         .deploy => startDeploy(),
         .deployed => {
             var buf: [512]u8 = undefined;
@@ -1258,6 +1286,78 @@ fn createSite() void {
     redrawAll();
     const thread = std.Thread.spawn(.{}, NewSite.run, .{job}) catch return;
     thread.detach();
+}
+
+// New project.
+
+/// A project's name as the dashboard takes it: 1 to 60 characters.
+fn projectNameProblem(name: []const u8) ?[]const u8 {
+    const trimmed = std.mem.trim(u8, name, " ");
+    if (trimmed.len == 0) return "";
+    if (trimmed.len > 60) return "At most 60 characters.";
+    return null;
+}
+
+fn projectState(fields: *[1]sheet.Field) sheet.State {
+    const size = window.size();
+    const a = frame_arena.allocator();
+    const space = switch (view) {
+        .space => |i| if (i < cloud.spaces.len) cloud.spaces[i].name else "your space",
+        else => "your space",
+    };
+    const problem = projectNameProblem(name_field.value());
+    const usual: sheet.Note = .{
+        .text = "Its address is made from the name, with six random characters.",
+    };
+    fields[0] = .{
+        .label = "Name",
+        .field = &name_field,
+        .placeholder = "My project",
+        .note = if (sheet_error) |e| .{
+            .text = e,
+            .kind = .bad,
+        } else if (problem) |pr| (if (pr.len > 0) sheet.Note{
+            .text = pr,
+            .kind = .bad,
+        } else usual) else usual,
+    };
+    return .{
+        .title = "New project",
+        .description = std.fmt.allocPrint(a, "A Publr Cloud project in {s}, with the starter page. It can hold several sites.", .{space}) catch "",
+        .fields = fields[0..1],
+        .primary = "Create project",
+        .primary_enabled = problem == null,
+        .busy = sheet_busy,
+        .hover = sheet_hover,
+        .window_width = @floatCast(size.w),
+        .window_height = @floatCast(size.h),
+    };
+}
+
+fn createProject() void {
+    if (sheet_busy != null or projectNameProblem(name_field.value()) != null) return;
+    const i = switch (view) {
+        .space => |index| index,
+        else => return,
+    };
+    if (i >= cloud.spaces.len) return;
+    sheet_busy = "Making the project…";
+    redrawAll();
+    cloud.createProject(cloud.spaces[i].slug, std.mem.trim(u8, name_field.value(), " "), projectMade);
+}
+
+fn projectMade(made: @import("cloud.zig").Made) void {
+    sheet_busy = null;
+    if (made.problem) |pr| {
+        // The message outlives this call: Cloud's words are in the job's memory.
+        if (problem_text.len > 0) gpa.free(problem_text);
+        problem_text = gpa.dupe(u8, pr) catch "";
+        sheet_error = problem_text;
+        return redrawAll();
+    }
+    closeSheet();
+    cloud.refresh();
+    openProjectAdmin(made.name, made.address);
 }
 
 /// `p new` makes the site with the starter page and starts it: off the main thread.

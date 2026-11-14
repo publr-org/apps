@@ -156,6 +156,42 @@ pub const Cloud = struct {
         t.detach();
     }
 
+    /// Makes a project named `name` in `space`, with the starter page, as the dashboard's
+    /// New project does; `done` gets its address, or Cloud's reason, on the main thread.
+    pub fn createProject(self: *Cloud, space: []const u8, name: []const u8, done: *const fn (made: Made) void) void {
+        const token = self.token orelse return;
+        var buf: [256]u8 = undefined;
+        const job = self.gpa.create(Create) catch return;
+        job.* = .{
+            .cloud = self,
+            .domain = self.gpa.dupe(u8, self.projectDomain(&buf)) catch return,
+            .space = self.gpa.dupe(u8, space) catch return,
+            .name = self.gpa.dupe(u8, name) catch return,
+            .token = self.gpa.dupe(u8, token) catch return,
+            .done = done,
+        };
+        const t = std.Thread.spawn(.{}, Create.run, .{job}) catch return;
+        t.detach();
+    }
+
+    /// Signs in to the project `slug` as the member, as the dashboard's `/sign-on` does: `done`
+    /// gets the project's `/auth/sign-on` address, good once and for a minute, which lands
+    /// signed in on its admin; or Cloud's reason, on the main thread.
+    pub fn signOnTo(self: *Cloud, slug: []const u8, done: *const fn (signed: SignedOn) void) void {
+        const token = self.token orelse return;
+        var buf: [256]u8 = undefined;
+        const job = self.gpa.create(SignOn) catch return;
+        job.* = .{
+            .cloud = self,
+            .domain = self.gpa.dupe(u8, self.projectDomain(&buf)) catch return,
+            .slug = self.gpa.dupe(u8, slug) catch return,
+            .token = self.gpa.dupe(u8, token) catch return,
+            .done = done,
+        };
+        const t = std.Thread.spawn(.{}, SignOn.run, .{job}) catch return;
+        t.detach();
+    }
+
     /// The dashboard page for the account's own settings (apps signed in, sign out).
     pub fn accountPage(self: *const Cloud, buf: []u8) [:0]const u8 {
         return std.fmt.bufPrintZ(buf, "{s}/account", .{self.base}) catch "";
@@ -208,6 +244,144 @@ const Check = struct {
         const self: *Check = @ptrCast(@alignCast(ctx));
         const gpa = self.cloud.gpa;
         self.done(self.slug, self.answer);
+        gpa.free(self.slug);
+        gpa.free(self.token);
+        gpa.destroy(self);
+    }
+};
+
+/// A project made, or why not: `address` is its site's, `problem` Cloud's words.
+pub const Made = struct {
+    name: []const u8,
+    address: []const u8 = "",
+    problem: ?[]const u8 = null,
+};
+
+const Create = struct {
+    cloud: *Cloud,
+    /// Where its address goes, read on the main thread with the listing.
+    domain: []u8,
+    space: []u8,
+    name: []u8,
+    token: []u8,
+    arena: ?std.heap.ArenaAllocator = null,
+    made: Made = .{
+        .name = "",
+    },
+    done: *const fn (made: Made) void,
+
+    fn run(self: *Create) void {
+        self.arena = .init(self.cloud.gpa);
+        const a = self.arena.?.allocator();
+        self.made = .{
+            .name = self.name,
+            .problem = "Publr Cloud could not be reached.",
+        };
+        const sent = std.json.Stringify.valueAlloc(a, .{
+            .space = self.space,
+            .name = self.name,
+        }, .{}) catch return native.runOnMain(self, finish);
+        if (request(self.cloud.io, a, self.cloud.base, .POST, "/api/cloud.create_project", .{
+            .token = self.token,
+            .payload = sent,
+            .content_type = "application/json",
+        })) |reply| {
+            const Answer = struct {
+                slug: []const u8 = "",
+                message: ?[]const u8 = null,
+            };
+            const answer = std.json.parseFromSliceLeaky(Answer, a, reply.body, .{
+                .ignore_unknown_fields = true,
+            }) catch Answer{};
+            if (reply.status == .ok and answer.slug.len > 0) {
+                const scheme = if (std.mem.startsWith(u8, self.cloud.base, "http://")) "http" else "https";
+                self.made.problem = null;
+                self.made.address = std.fmt.allocPrint(a, "{s}://{s}.{s}", .{ scheme, answer.slug, self.domain }) catch "";
+            } else {
+                self.made.problem = answer.message orelse "Publr Cloud did not make the project.";
+            }
+        } else |_| {}
+        native.runOnMain(self, finish);
+    }
+
+    fn finish(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *Create = @ptrCast(@alignCast(ctx));
+        const gpa = self.cloud.gpa;
+        self.done(self.made);
+        if (self.arena) |*arena| arena.deinit();
+        gpa.free(self.domain);
+        gpa.free(self.space);
+        gpa.free(self.name);
+        gpa.free(self.token);
+        gpa.destroy(self);
+    }
+};
+
+/// A project's sign-on address, or why there is none.
+pub const SignedOn = struct {
+    slug: []const u8,
+    url: [:0]const u8 = "",
+    problem: ?[]const u8 = null,
+};
+
+const SignOn = struct {
+    cloud: *Cloud,
+    /// Where projects live when Cloud names none, read on the main thread.
+    domain: []u8,
+    slug: []u8,
+    token: []u8,
+    arena: ?std.heap.ArenaAllocator = null,
+    signed: SignedOn = .{
+        .slug = "",
+    },
+    done: *const fn (signed: SignedOn) void,
+
+    fn run(self: *SignOn) void {
+        self.arena = .init(self.cloud.gpa);
+        const a = self.arena.?.allocator();
+        self.signed = .{
+            .slug = self.slug,
+            .problem = "Publr Cloud could not be reached.",
+        };
+        const sent = std.json.Stringify.valueAlloc(a, .{
+            .project = self.slug,
+        }, .{}) catch return native.runOnMain(self, finish);
+        if (request(self.cloud.io, a, self.cloud.base, .POST, "/api/cloud.sign_on_token", .{
+            .token = self.token,
+            .payload = sent,
+            .content_type = "application/json",
+        })) |reply| {
+            const Answer = struct {
+                token: []const u8 = "",
+                slug: []const u8 = "",
+                domain: ?[]const u8 = null,
+                message: ?[]const u8 = null,
+            };
+            const answer = std.json.parseFromSliceLeaky(Answer, a, reply.body, .{
+                .ignore_unknown_fields = true,
+            }) catch Answer{};
+            if (reply.status == .ok and answer.token.len > 0) {
+                const scheme = if (std.mem.startsWith(u8, self.cloud.base, "http://")) "http" else "https";
+                self.signed.problem = null;
+                self.signed.url = std.fmt.allocPrintSentinel(a, "{s}://{s}.{s}/auth/sign-on?token={s}&return=%2Fadmin", .{
+                    scheme,
+                    answer.slug,
+                    answer.domain orelse self.domain,
+                    answer.token,
+                }, 0) catch "";
+            } else {
+                self.signed.problem = answer.message orelse "Publr Cloud did not sign you in to the project.";
+            }
+        } else |_| {}
+        native.runOnMain(self, finish);
+    }
+
+    fn finish(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *SignOn = @ptrCast(@alignCast(ctx));
+        const gpa = self.cloud.gpa;
+        self.done(self.signed);
+        if (self.arena) |*arena| arena.deinit();
+        gpa.free(self.domain);
         gpa.free(self.slug);
         gpa.free(self.token);
         gpa.destroy(self);

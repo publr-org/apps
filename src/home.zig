@@ -277,8 +277,13 @@ const button_text: ui.TextStyle = .{
     .weight = 500,
 };
 
+/// A Cloud space makes projects there; anywhere else, a site on this Mac.
+fn newLabel(s: State) []const u8 {
+    return if (s.view == .space) "New project" else "New site";
+}
+
 fn newSiteRect(s: State, u: *ui.Ui) ui.Rect {
-    const w = u.measure("New site", button_text) + 28 + 22;
+    const w = u.measure(newLabel(s), button_text) + 28 + 22;
     return .{
         .x = s.width - pad - w,
         .y = s.top + header_height + 30,
@@ -654,7 +659,8 @@ fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
     }
 }
 
-/// The page's title and how many sites it holds, with New site: the admin's page head.
+/// The page's title and how many it holds, with New site (New project in a space): the
+/// admin's page head.
 fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
     const x = sidebar_width + pad;
     const w = s.width - x - pad - 140;
@@ -699,7 +705,7 @@ fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = n.y,
         .w = n.w - 36 - 14,
         .h = n.h,
-    }, "New site", .{
+    }, newLabel(s), .{
         .size = button_text.size,
         .weight = button_text.weight,
         .color = t.on_primary,
@@ -712,7 +718,7 @@ fn drawContent(u: *ui.Ui, s: State, t: *const Theme) !void {
         const empty = switch (s.view) {
             .recents => "Sites you open show up here.",
             .local => "No sites on this Mac yet. New site makes one.",
-            .space => "No projects in this space yet.",
+            .space => "No projects in this space yet. New project makes one.",
         };
         try u.text(.{
             .x = c.x + pad,
