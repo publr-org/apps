@@ -90,7 +90,7 @@ var theme_forced = false;
 var tabs: std.ArrayList(Tab) = .empty;
 var active: ?usize = null;
 var hover: Hover = .none;
-var view: home.View = .local;
+var view: home.View = .all;
 var layout: home.Layout = .grid;
 var scroll: f32 = 0;
 var cloud: Cloud = undefined;
@@ -105,8 +105,7 @@ var menu: ?struct {
 } = null;
 /// The sheet open over Home, if any.
 var open_sheet: ?enum {
-    new_site,
-    /// New project, in the Cloud space open.
+    /// New project: on this Mac or on Cloud (`new_where`).
     new_project,
     deploy,
     /// The site is live: where, and its buttons.
@@ -331,40 +330,102 @@ fn barState(titles: *[64][]const u8) bar.State {
     };
 }
 
-/// The sites the view lists, as Home items (rebuilt every call; valid until the next).
+/// The projects the filter shows, as Home items, each once (rebuilt every call; valid until
+/// the next). A folder on this Mac deployed to a Cloud project is one item with it.
 fn viewItems() []const home.Item {
     _ = frame_arena.reset(.retain_capacity);
     const a = frame_arena.allocator();
     items.clearRetainingCapacity();
     item_refs.clearRetainingCapacity();
     switch (view) {
-        .local => for (sites.list.items) |s| addLocal(a, s.name),
         .recents => for (recents.items) |name| {
             if (sites.find(name) != null) addLocal(a, name);
         },
-        .space => |i| if (i < cloud.spaces.len) for (cloud.spaces[i].projects, 0..) |_, k| addProject(a, i, k),
+        .all => {
+            for (sites.list.items) |s| addLocal(a, s.name);
+            addUnlinked(a, null);
+        },
+        .local => for (sites.list.items) |s| addLocal(a, s.name),
+        .cloud => {
+            for (sites.list.items) |s| if (linkedProject(s) != null) addLocal(a, s.name);
+            addUnlinked(a, null);
+        },
+        .space => |i| {
+            for (sites.list.items) |s| if (linkedProject(s)) |at| if (at.space == i) addLocal(a, s.name);
+            addUnlinked(a, i);
+        },
     }
     return items.items;
 }
 
+const ProjectAt = struct {
+    space: usize,
+    project: usize,
+};
+
+/// The Cloud project a folder on this Mac was deployed to: the one live at its address.
+fn linkedProject(s: @import("sites.zig").Site) ?ProjectAt {
+    if (s.live.len == 0) return null;
+    for (cloud.spaces, 0..) |sp, i| for (sp.projects, 0..) |p, k| {
+        if (std.mem.eql(u8, hostOf(p.address), hostOf(s.live))) return .{
+            .space = i,
+            .project = k,
+        };
+    };
+    return null;
+}
+
+/// Whether a folder on this Mac is the working copy of the project.
+fn hasLocalCopy(p: @import("cloud.zig").Project) bool {
+    for (sites.list.items) |s| {
+        if (s.live.len > 0 and std.mem.eql(u8, hostOf(s.live), hostOf(p.address))) return true;
+    }
+    return false;
+}
+
+/// Cloud's projects with no copy on this Mac: every space's, or one's.
+fn addUnlinked(a: std.mem.Allocator, only: ?usize) void {
+    for (cloud.spaces, 0..) |sp, i| {
+        if (only) |o| if (o != i) continue;
+        for (sp.projects, 0..) |p, k| if (!hasLocalCopy(p)) addProject(a, i, k);
+    }
+}
+
 fn addLocal(a: std.mem.Allocator, name: []const u8) void {
     const s = sites.find(name) orelse return;
-    const host = if (std.mem.indexOf(u8, s.address, "://")) |i| s.address[i + 3 ..] else s.address;
-    // A deployed site shows where it is live.
-    const where = if (s.live.len > 0) hostOf(s.live) else host;
+    // A deployed folder is the project on Cloud, its working copy here: where it is live.
     // No-break spaces: the line is cut at its end when the address is long, never wrapped
     // at the dot, which would leave only "Running ·…".
-    const detail = std.fmt.allocPrint(a, "{s}\u{00a0}\u{00b7}\u{00a0}{s}", .{ if (s.running) "Running" else "Stopped", where }) catch return;
+    const deployed = s.live.len > 0;
+    const detail = if (deployed)
+        std.fmt.allocPrint(a, "{s}\u{00a0}\u{00b7}\u{00a0}On this Mac", .{hostOf(s.live)}) catch return
+    else
+        std.fmt.allocPrint(a, "On this Mac\u{00a0}\u{00b7}\u{00a0}{s}", .{if (s.running) "Running" else "Stopped"}) catch return;
     var kb: [256]u8 = undefined;
     const thumb = if (thumbs.key(&kb, s.name)) |k| a.dupe(u8, k) catch null else null;
     items.append(gpa, .{
         .name = s.name,
         .detail = detail,
-        .kind = .local,
+        .kind = if (deployed) .both else .local,
         .running = s.running,
         .thumb = thumb,
     }) catch return;
     item_refs.append(gpa, .{ .local = s.name }) catch {};
+}
+
+/// How many projects each filter holds, each once.
+fn counts() struct { all: usize, local: usize, cloud: usize } {
+    var unlinked: usize = 0;
+    var on_cloud: usize = 0;
+    for (cloud.spaces) |sp| for (sp.projects) |p| {
+        on_cloud += 1;
+        if (!hasLocalCopy(p)) unlinked += 1;
+    };
+    return .{
+        .all = sites.list.items.len + unlinked,
+        .local = sites.list.items.len,
+        .cloud = on_cloud,
+    };
 }
 
 fn hostOf(address: []const u8) []const u8 {
@@ -411,7 +472,16 @@ fn cloudChanged() void {
         var nb: [256]u8 = undefined;
         thumbs.take(std.fmt.bufPrint(&nb, "cloud-{s}", .{p.slug}) catch continue, p.address);
     };
-    if (view == .space and cloud.spaces.len == 0) view = .local;
+    // A filter that is no longer offered falls back to the whole list.
+    switch (view) {
+        .cloud => if (cloud.status != .signed_in) {
+            view = .all;
+        },
+        .space => |i| if (cloud.spaces.len < 2 or i >= cloud.spaces.len) {
+            view = if (cloud.status == .signed_in) .cloud else .all;
+        },
+        else => {},
+    }
     if (deploy_after_sign_in) |name| if (cloud.status != .signing_in) {
         deploy_after_sign_in = null;
         if (cloud.status == .signed_in) deploy(name);
@@ -423,6 +493,7 @@ fn cloudChanged() void {
 fn homeState() home.State {
     const size = window.size();
     const its = viewItems();
+    const counted = counts();
     var st: home.State = .{
         .top = bar.height,
         .width = @floatCast(size.w),
@@ -430,7 +501,9 @@ fn homeState() home.State {
         .view = view,
         .layout = layout,
         .items = its,
-        .local_count = sites.list.items.len,
+        .all_count = counted.all,
+        .local_count = counted.local,
+        .cloud_count = counted.cloud,
         .spaces = spaceList(),
         .account = switch (cloud.status) {
             .signed_out => .signed_out,
@@ -445,8 +518,10 @@ fn homeState() home.State {
         .menu = null,
         .title = switch (view) {
             .recents => "Recent",
+            .all => "All projects",
             .local => "On this Mac",
-            .space => |i| if (i < cloud.spaces.len) cloud.spaces[i].name else "Cloud",
+            .cloud => "On Cloud",
+            .space => |i| if (i < cloud.spaces.len) cloud.spaces[i].name else "On Cloud",
         },
     };
     if (menu) |m| st.menu = .{
@@ -716,7 +791,9 @@ fn clickHome(t: home.Target, m: native.event.Mouse) void {
             }
         },
         .recents => setView(.recents),
+        .all => setView(.all),
         .local => setView(.local),
+        .cloud => setView(.cloud),
         .space => |i| setView(.{ .space = i }),
         .show_grid => layout = .grid,
         .show_list => layout = .list,
@@ -769,7 +846,7 @@ fn actAccount(tag: u32) void {
         Action.open_dashboard => native.openInBrowser(std.fmt.bufPrintZ(&buf, "{s}", .{cloud.base}) catch return),
         Action.sign_out => {
             cloud.signOut();
-            if (view == .space) view = .local;
+            if (view == .space or view == .cloud) view = .all;
         },
         else => {},
     }
@@ -819,7 +896,7 @@ fn signedOn(signed: @import("cloud.zig").SignedOn) void {
 fn setView(v: home.View) void {
     view = v;
     scroll = 0;
-    if (v == .local or v == .recents) sites.refresh();
+    sites.refresh();
 }
 
 fn act(name: []const u8, tag: u32) void {
@@ -840,8 +917,9 @@ fn act(name: []const u8, tag: u32) void {
             native.openInBrowser(std.fmt.bufPrintZ(&buf, "{s}", .{s.live}) catch return);
         },
         Action.cloud_admin => {
-            var buf: [512]u8 = undefined;
-            native.openInBrowser(std.fmt.bufPrintZ(&buf, "{s}", .{s.live_admin}) catch return);
+            // Its own tab, beside the working copy's, signed in as the dashboard signs in.
+            var buf: [256]u8 = undefined;
+            openProjectAdmin(std.fmt.bufPrint(&buf, "{s} \u{00b7} Cloud", .{name}) catch return, s.live);
         },
         Action.stop => sites.command(&.{ "stop", name }),
         Action.start => sites.command(&.{ "start", name }),
@@ -934,9 +1012,31 @@ fn timeHome() void {
 
 // New site.
 
+/// Where New project makes the project.
+var new_where: enum {
+    local,
+    cloud,
+} = .local;
+
+/// Cloud is offered when signed in with a space to make projects in.
+fn cloudOffered() bool {
+    return cloud.status == .signed_in and cloud.spaces.len > 0;
+}
+
+/// The space New project makes a Cloud project in: the one the filter shows, else the first.
+fn targetSpace() usize {
+    return switch (view) {
+        .space => |i| if (i < cloud.spaces.len) i else 0,
+        else => 0,
+    };
+}
+
 fn openNewSite() void {
     if (active != null) showHome();
-    open_sheet = if (view == .space) .new_project else .new_site;
+    open_sheet = .new_project;
+    // On the Cloud filters it starts on Cloud; anywhere else on this Mac.
+    const on_cloud = view == .cloud or view == .space;
+    new_where = if (cloudOffered() and on_cloud) .cloud else .local;
     name_field.set("");
     sheet_error = null;
     sheet_busy = null;
@@ -965,7 +1065,16 @@ fn nameProblem(name: []const u8) ?[]const u8 {
 fn sheetState(fields: *[1]sheet.Field) sheet.State {
     if (open_sheet == .deploy) return deployState(fields);
     if (open_sheet == .deployed) return deployedState();
-    if (open_sheet == .new_project) return projectState(fields);
+    var state = if (new_where == .cloud and cloudOffered()) projectState(fields) else localState(fields);
+    if (cloudOffered()) state.choice = .{
+        .label = "Where",
+        .options = &.{ "On this Mac", "On Cloud" },
+        .selected = @intFromEnum(new_where),
+    };
+    return state;
+}
+
+fn localState(fields: *[1]sheet.Field) sheet.State {
     const size = window.size();
     const name = name_field.value();
     const problem = nameProblem(name);
@@ -986,10 +1095,10 @@ fn sheetState(fields: *[1]sheet.Field) sheet.State {
         },
     };
     return .{
-        .title = "New site",
-        .description = "A Publr site on this Mac, with the starter page. Deploy it to Publr Cloud whenever you like.",
+        .title = "New project",
+        .description = "A project on this Mac, with the starter page. Deploy it to Publr Cloud whenever you like.",
         .fields = fields[0..1],
-        .primary = "Create site",
+        .primary = "Create project",
         .primary_enabled = problem == null,
         .busy = sheet_busy,
         .hover = sheet_hover,
@@ -1006,7 +1115,7 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
             if (!std.meta.eql(h, sheet_hover)) {
                 sheet_hover = h;
                 win.setCursor(switch (h) {
-                    .primary, .cancel => .pointer,
+                    .primary, .cancel, .option => .pointer,
                     .field => .text,
                     .none => .arrow,
                 });
@@ -1016,6 +1125,11 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
         .mouse_down => |m| switch (sheet.hit(sheetState(&fields), u, m.x, m.y)) {
             .primary => primaryAction(),
             .cancel => if (deploy_job == null) closeSheet(),
+            .option => |i| {
+                new_where = if (i == 1) .cloud else .local;
+                sheet_error = null;
+                redrawAll();
+            },
             else => {},
         },
         .text_command => |c| switch (c) {
@@ -1048,8 +1162,7 @@ fn fieldChanged() void {
 
 fn primaryAction() void {
     switch (open_sheet orelse return) {
-        .new_site => createSite(),
-        .new_project => createProject(),
+        .new_project => if (new_where == .cloud and cloudOffered()) createProject() else createSite(),
         .deploy => startDeploy(),
         .deployed => {
             var buf: [512]u8 = undefined;
@@ -1301,10 +1414,7 @@ fn projectNameProblem(name: []const u8) ?[]const u8 {
 fn projectState(fields: *[1]sheet.Field) sheet.State {
     const size = window.size();
     const a = frame_arena.allocator();
-    const space = switch (view) {
-        .space => |i| if (i < cloud.spaces.len) cloud.spaces[i].name else "your space",
-        else => "your space",
-    };
+    const space = cloud.spaces[targetSpace()].name;
     const problem = projectNameProblem(name_field.value());
     const usual: sheet.Note = .{
         .text = "Its address is made from the name, with six random characters.",
@@ -1323,7 +1433,7 @@ fn projectState(fields: *[1]sheet.Field) sheet.State {
     };
     return .{
         .title = "New project",
-        .description = std.fmt.allocPrint(a, "A Publr Cloud project in {s}, with the starter page. It can hold several sites.", .{space}) catch "",
+        .description = std.fmt.allocPrint(a, "A project on Publr Cloud, in {s}, with the starter page.", .{space}) catch "",
         .fields = fields[0..1],
         .primary = "Create project",
         .primary_enabled = problem == null,
@@ -1336,11 +1446,8 @@ fn projectState(fields: *[1]sheet.Field) sheet.State {
 
 fn createProject() void {
     if (sheet_busy != null or projectNameProblem(name_field.value()) != null) return;
-    const i = switch (view) {
-        .space => |index| index,
-        else => return,
-    };
-    if (i >= cloud.spaces.len) return;
+    if (!cloudOffered()) return;
+    const i = targetSpace();
     sheet_busy = "Making the project…";
     redrawAll();
     cloud.createProject(cloud.spaces[i].slug, std.mem.trim(u8, name_field.value(), " "), projectMade);

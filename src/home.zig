@@ -1,9 +1,10 @@
-//! Home: every site. Laid out as PublrDesign's file browser (a sidebar, the sites as
-//! pictures in a grid or as rows) and set as Publr's admin is: its type, greys, sidebar,
-//! page title and buttons. The sidebar (Recent, On this Mac, Cloud's spaces, the account
-//! at its foot), the bar (where you are, grid or list), the page's title with New site,
-//! the sites, and a site's menu. Layout and hit testing together, so what is drawn is what
-//! answers the mouse.
+//! Home: every project, in one list, each once. Laid out as PublrDesign's file browser (a
+//! sidebar, the projects as pictures in a grid or as rows) and set as Publr's admin is: its
+//! type, greys, sidebar, page title and buttons. The sidebar filters the one list (Recent,
+//! All projects, On this Mac, On Cloud, each space when there are several; the account at
+//! its foot), the bar (where you are, grid or list), the page's title with New project, the
+//! projects, and a project's menu. A project on Cloud with its working copy on this Mac is
+//! one card. Layout and hit testing together, so what is drawn is what answers the mouse.
 
 const std = @import("std");
 const ui = @import("ui");
@@ -14,7 +15,7 @@ const centred = @import("bar.zig").centred;
 
 pub const sidebar_width: f32 = 240;
 const header_height: f32 = 48;
-/// The page's title, its count and New site, under the bar.
+/// The page's title, its count and New project, under the bar.
 const head_height: f32 = 100;
 const pad: f32 = 24;
 const gap: f32 = 20;
@@ -32,14 +33,18 @@ const menu_item: f32 = 30;
 const menu_pad: f32 = 6;
 
 pub const Kind = enum {
+    /// Only on this Mac.
     local,
+    /// Only on Cloud.
     cloud,
+    /// On Cloud, its working copy on this Mac.
+    both,
 };
 
-/// A site as Home shows it.
+/// A project as Home shows it.
 pub const Item = struct {
     name: []const u8,
-    /// "On this Mac · Running", "ada.publr.app · Live".
+    /// "On this Mac · Running", "ada.publr.app · Live", "ada.publr.app · On this Mac".
     detail: []const u8,
     kind: Kind,
     running: bool,
@@ -47,9 +52,13 @@ pub const Item = struct {
     thumb: ?[]const u8 = null,
 };
 
+/// The filter on the one list.
 pub const View = union(enum) {
     recents,
+    all,
     local,
+    cloud,
+    /// One space's, listed when there are several.
     space: usize,
 };
 
@@ -91,7 +100,9 @@ pub const Target = union(enum) {
     account,
     sign_in,
     recents,
+    all,
     local,
+    cloud,
     space: usize,
     show_grid,
     show_list,
@@ -111,7 +122,9 @@ pub const State = struct {
     view: View,
     layout: Layout,
     items: []const Item,
+    all_count: usize,
     local_count: usize,
+    cloud_count: usize,
     spaces: []const Space,
     account: Account,
     hover: Target,
@@ -222,7 +235,9 @@ pub fn maxScroll(s: State) f32 {
         .view = s.view,
         .layout = s.layout,
         .items = s.items,
+        .all_count = s.all_count,
         .local_count = s.local_count,
+        .cloud_count = s.cloud_count,
         .spaces = s.spaces,
         .account = s.account,
         .hover = s.hover,
@@ -258,18 +273,27 @@ pub fn accountMenuBottom(s: State) f32 {
     return accountRect(s).y - 4;
 }
 
-/// The Cloud section's label, under Recent and On this Mac.
+/// The Cloud section's label, under Recent, All projects and On this Mac.
 fn cloudLabelRect(s: State) ui.Rect {
-    var r = navRect(s, 2);
+    var r = navRect(s, 3);
     r.h = label_height;
     return r;
 }
 
-/// The Cloud section's rows.
-fn spaceRect(s: State, i: usize) ui.Rect {
-    var r = navRect(s, 2 + i);
+/// The Cloud section's rows: On Cloud, then each space when there are several.
+fn cloudRowRect(s: State, k: usize) ui.Rect {
+    var r = navRect(s, 3 + k);
     r.y += label_height;
     return r;
+}
+
+fn spaceRect(s: State, i: usize) ui.Rect {
+    return cloudRowRect(s, 1 + i);
+}
+
+/// Spaces are filters of their own only when there are several.
+fn spacesListed(s: State) usize {
+    return if (s.spaces.len > 1) s.spaces.len else 0;
 }
 
 const button_text: ui.TextStyle = .{
@@ -277,13 +301,10 @@ const button_text: ui.TextStyle = .{
     .weight = 500,
 };
 
-/// A Cloud space makes projects there; anywhere else, a site on this Mac.
-fn newLabel(s: State) []const u8 {
-    return if (s.view == .space) "New project" else "New site";
-}
+const new_label = "New project";
 
 fn newSiteRect(s: State, u: *ui.Ui) ui.Rect {
-    const w = u.measure(newLabel(s), button_text) + 28 + 22;
+    const w = u.measure(new_label, button_text) + 28 + 22;
     return .{
         .x = s.width - pad - w,
         .y = s.top + header_height + 30,
@@ -343,10 +364,14 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (x < sidebar_width) {
         if (accountRect(s).contains(x, y)) return if (s.account == .signed_in) .account else .sign_in;
         if (navRect(s, 0).contains(x, y)) return .recents;
-        if (navRect(s, 1).contains(x, y)) return .local;
-        if (s.account == .signed_in) for (s.spaces, 0..) |_, i| {
-            if (spaceRect(s, i).contains(x, y)) return .{ .space = i };
-        };
+        if (navRect(s, 1).contains(x, y)) return .all;
+        if (navRect(s, 2).contains(x, y)) return .local;
+        if (s.account == .signed_in) {
+            if (cloudRowRect(s, 0).contains(x, y)) return .cloud;
+            for (0..spacesListed(s)) |i| {
+                if (spaceRect(s, i).contains(x, y)) return .{ .space = i };
+            }
+        }
         return .none;
     }
     if (y < s.top + header_height) {
@@ -374,7 +399,9 @@ pub fn targetRect(s: State, u: *ui.Ui, t: Target) ?ui.Rect {
         .none, .outside_menu, .menu_item => null,
         .account, .sign_in => accountRect(s),
         .recents => navRect(s, 0),
-        .local => navRect(s, 1),
+        .all => navRect(s, 1),
+        .local => navRect(s, 2),
+        .cloud => cloudRowRect(s, 0),
         .space => |i| spaceRect(s, i),
         .show_grid => layoutRect(s, .grid),
         .show_list => layoutRect(s, .list),
@@ -456,8 +483,10 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
     }, t.border, 0);
 
     var buf: [16]u8 = undefined;
+    var all_buf: [16]u8 = undefined;
     try navItem(u, t, navRect(s, 0), icons.clock_rewind, "Recent", null, s.view == .recents, same(s.hover, .recents));
-    try navItem(u, t, navRect(s, 1), icons.device_desktop, "On this Mac", std.fmt.bufPrint(&buf, "{d}", .{s.local_count}) catch null, s.view == .local, same(s.hover, .local));
+    try navItem(u, t, navRect(s, 1), icons.layout_grid, "All projects", std.fmt.bufPrint(&all_buf, "{d}", .{s.all_count}) catch null, s.view == .all, same(s.hover, .all));
+    try navItem(u, t, navRect(s, 2), icons.device_desktop, "On this Mac", std.fmt.bufPrint(&buf, "{d}", .{s.local_count}) catch null, s.view == .local, same(s.hover, .local));
 
     const label = cloudLabelRect(s);
     try u.text(.{
@@ -473,22 +502,24 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .upper = true,
     });
     if (s.account == .signed_in) {
-        for (s.spaces, 0..) |sp, i| {
+        var on_cloud: [16]u8 = undefined;
+        try navItem(u, t, cloudRowRect(s, 0), icons.globe, "On Cloud", std.fmt.bufPrint(&on_cloud, "{d}", .{s.cloud_count}) catch null, s.view == .cloud, same(s.hover, .cloud));
+        for (s.spaces[0..spacesListed(s)], 0..) |sp, i| {
             var cb: [16]u8 = undefined;
             const selected = switch (s.view) {
                 .space => |k| k == i,
                 else => false,
             };
-            try navItem(u, t, spaceRect(s, i), icons.globe, sp.name, std.fmt.bufPrint(&cb, "{d}", .{sp.count}) catch null, selected, same(s.hover, .{ .space = i }));
+            try navItem(u, t, spaceRect(s, i), icons.folder, sp.name, std.fmt.bufPrint(&cb, "{d}", .{sp.count}) catch null, selected, same(s.hover, .{ .space = i }));
         }
     } else {
-        const r = spaceRect(s, 0);
+        const r = cloudRowRect(s, 0);
         try u.text(.{
             .x = r.x + 10,
             .y = r.y,
             .w = r.w - 20,
             .h = r.h,
-        }, "Sign in to see your Cloud sites", .{
+        }, "Sign in to see your Cloud projects", .{
             .size = 12,
             .color = t.text2,
         });
@@ -592,7 +623,7 @@ fn secondaryButton(u: *ui.Ui, t: *const Theme, r: ui.Rect, label: []const u8, ho
     });
 }
 
-/// The bar: where you are ("Sites / On this Mac"), and grid or list.
+/// The bar: where you are ("Projects / On this Mac"), and grid or list.
 fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
     try u.rect(.{
         .x = sidebar_width,
@@ -604,7 +635,7 @@ fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
         .size = 13,
         .color = t.text2,
     };
-    const first = u.measure("Sites", crumb);
+    const first = u.measure("Projects", crumb);
     const slash = u.measure("/", crumb);
     var x = sidebar_width + pad;
     try u.text(.{
@@ -612,7 +643,7 @@ fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = s.top,
         .w = first,
         .h = header_height,
-    }, "Sites", crumb);
+    }, "Projects", crumb);
     x += first + 8;
     try u.text(.{
         .x = x,
@@ -659,8 +690,7 @@ fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
     }
 }
 
-/// The page's title and how many it holds, with New site (New project in a space): the
-/// admin's page head.
+/// The page's title and how many projects it holds, with New project: the admin's page head.
 fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
     const x = sidebar_width + pad;
     const w = s.width - x - pad - 140;
@@ -676,10 +706,7 @@ fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
         .tracking = -0.56,
     });
     var buf: [32]u8 = undefined;
-    const noun = switch (s.view) {
-        .space => if (s.items.len == 1) "project" else "projects",
-        else => if (s.items.len == 1) "site" else "sites",
-    };
+    const noun = if (s.items.len == 1) "project" else "projects";
     try u.text(.{
         .x = x,
         .y = s.top + header_height + 60,
@@ -705,7 +732,7 @@ fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = n.y,
         .w = n.w - 36 - 14,
         .h = n.h,
-    }, newLabel(s), .{
+    }, new_label, .{
         .size = button_text.size,
         .weight = button_text.weight,
         .color = t.on_primary,
@@ -716,8 +743,10 @@ fn drawContent(u: *ui.Ui, s: State, t: *const Theme) !void {
     const c = contentRect(s);
     if (s.items.len == 0) {
         const empty = switch (s.view) {
-            .recents => "Sites you open show up here.",
-            .local => "No sites on this Mac yet. New site makes one.",
+            .recents => "Projects you open show up here.",
+            .all => "No projects yet. New project makes one.",
+            .local => "No projects on this Mac yet. New project makes one.",
+            .cloud => "No projects on Cloud yet. New project makes one there.",
             .space => "No projects in this space yet. New project makes one.",
         };
         try u.text(.{
@@ -755,7 +784,7 @@ fn drawThumb(u: *ui.Ui, t: *const Theme, r: ui.Rect, it: Item, hovered: bool, ra
         .fill = t.hover,
         .radius = radius,
     });
-    if (it.thumb) |key| try u.image(r, key, radius) else try u.icon(centred(r, @min(28, r.h / 2)), if (it.kind == .cloud) icons.globe else icons.device_desktop, t.text3);
+    if (it.thumb) |key| try u.image(r, key, radius) else try u.icon(centred(r, @min(28, r.h / 2)), if (it.kind == .local) icons.device_desktop else icons.globe, t.text3);
     try u.box(r, .{
         .border = if (hovered) t.input else t.border,
         .radius = radius,

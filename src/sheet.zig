@@ -15,6 +15,8 @@ const button_height: f32 = 36;
 const head: f32 = 20 + 8 + 40 + 12;
 /// A field's label (22), the field and its note (26).
 const field_step: f32 = 22 + field_height + 26;
+/// A choice's label (22), its buttons and the room under them.
+const choice_step: f32 = 22 + field_height + 16;
 const button_text: ui.TextStyle = .{
     .size = 13,
     .weight = 500,
@@ -38,9 +40,18 @@ pub const Field = struct {
     note: ?Note = null,
 };
 
+/// One of a few options, side by side as one bordered control ("On this Mac", "On Cloud").
+pub const Choice = struct {
+    label: []const u8,
+    options: []const []const u8,
+    selected: usize,
+};
+
 pub const State = struct {
     title: []const u8,
     description: []const u8,
+    /// Above the fields.
+    choice: ?Choice = null,
     fields: []const Field,
     primary: []const u8,
     primary_enabled: bool,
@@ -57,10 +68,15 @@ pub const Target = union(enum) {
     primary,
     cancel,
     field: usize,
+    option: usize,
 };
 
+fn choiceHeight(s: State) f32 {
+    return if (s.choice != null) choice_step else 0;
+}
+
 fn panel(s: State) ui.Rect {
-    var h: f32 = pad + head;
+    var h: f32 = pad + head + choiceHeight(s);
     h += @as(f32, @floatFromInt(s.fields.len)) * field_step;
     h += 12 + button_height + pad;
     return .{
@@ -75,8 +91,20 @@ fn fieldRect(s: State, i: usize) ui.Rect {
     const p = panel(s);
     return .{
         .x = p.x + pad,
-        .y = p.y + pad + head + @as(f32, @floatFromInt(i)) * field_step + 22,
+        .y = p.y + pad + head + choiceHeight(s) + @as(f32, @floatFromInt(i)) * field_step + 22,
         .w = p.w - 2 * pad,
+        .h = field_height,
+    };
+}
+
+fn optionRect(s: State, i: usize) ui.Rect {
+    const p = panel(s);
+    const n: f32 = @floatFromInt(s.choice.?.options.len);
+    const w = (p.w - 2 * pad) / n;
+    return .{
+        .x = p.x + pad + w * @as(f32, @floatFromInt(i)),
+        .y = p.y + pad + head + 22,
+        .w = w,
         .h = field_height,
     };
 }
@@ -107,6 +135,9 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (s.busy == null) {
         if (buttonRect(s, u, .primary).contains(x, y)) return .primary;
         if (buttonRect(s, u, .cancel).contains(x, y)) return .cancel;
+        if (s.choice) |c| for (0..c.options.len) |i| {
+            if (optionRect(s, i).contains(x, y)) return .{ .option = i };
+        };
     }
     for (0..s.fields.len) |i| if (fieldRect(s, i).contains(x, y)) return .{ .field = i };
     return .none;
@@ -153,6 +184,7 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme, focus: ?usize, window: *native
         .color = t.text2,
         .truncate = false,
     });
+    if (s.choice) |c| try drawChoice(u, s, t, c);
     for (s.fields, 0..) |f, i| {
         const r = fieldRect(s, i);
         try u.text(.{
@@ -243,4 +275,46 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme, focus: ?usize, window: *native
         .color = t.on_primary,
         .@"align" = .center,
     });
+}
+
+/// The choice as the admin's segmented control: one bordered box, the chosen part filled.
+fn drawChoice(u: *ui.Ui, s: State, t: *const Theme, c: Choice) !void {
+    const first = optionRect(s, 0);
+    try u.text(.{
+        .x = first.x,
+        .y = first.y - 22,
+        .w = first.w * @as(f32, @floatFromInt(c.options.len)),
+        .h = 16,
+    }, c.label, .{
+        .size = 13,
+        .weight = 500,
+        .color = t.text,
+    });
+    try u.box(.{
+        .x = first.x,
+        .y = first.y,
+        .w = first.w * @as(f32, @floatFromInt(c.options.len)),
+        .h = first.h,
+    }, .{
+        .fill = t.bg,
+        .border = t.input,
+        .radius = 8,
+    });
+    for (c.options, 0..) |option, i| {
+        const r = optionRect(s, i);
+        const inner: ui.Rect = .{
+            .x = r.x + 3,
+            .y = r.y + 3,
+            .w = r.w - 6,
+            .h = r.h - 6,
+        };
+        const over = std.meta.eql(s.hover, Target{ .option = i });
+        if (i == c.selected) try u.rect(inner, t.selected, 6) else if (over) try u.rect(inner, t.hover, 6);
+        try u.text(r, option, .{
+            .size = 13,
+            .weight = if (i == c.selected) 500 else 400,
+            .color = if (i == c.selected) t.text else t.text2,
+            .@"align" = .center,
+        });
+    }
 }
