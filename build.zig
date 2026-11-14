@@ -40,7 +40,9 @@ pub fn build(b: *std.Build) void {
         }),
     });
     b.installArtifact(exe);
-    _ = native_build.addAppBundle(b, exe, "Publr Studio", "app.publr.studio", .{});
+    _ = native_build.addAppBundle(b, exe, "Publr Studio", "app.publr.studio", .{
+        .icon = b.path("assets/AppIcon.icns"),
+    });
 
     const tests = b.addTest(.{
         .root_module = exe.root_module,
