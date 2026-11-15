@@ -507,7 +507,7 @@ fn addLocal(a: std.mem.Allocator, name: []const u8) void {
         syncing.check(s.name, siteDir(&db, s.name), s.live, nowMs(), false);
         state = syncing.stateOf(s.name) orelse .checking;
     }
-    const label_buf = a.alloc(u8, 128) catch &.{};
+    const label_buf = a.alloc(u8, 128) catch return;
     const detail = if (linked) syncing.labelOf(s.name, state, label_buf) else if (s.running) "Running" else "Stopped";
     var kb: [256]u8 = undefined;
     const thumb = if (thumbs.key(&kb, s.name)) |k| a.dupe(u8, k) catch null else null;
