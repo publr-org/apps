@@ -127,10 +127,12 @@ pub const BundleOptions = struct {
     version: []const u8 = "0.0.0",
     /// The oldest macOS it runs on (the display link needs 14).
     min_macos: []const u8 = "14.0",
+    /// The app's icon, an `.icns` file; the system's blank one when null.
+    icon: ?std.Build.LazyPath = null,
 };
 
-/// A macOS `.app` around `exe`, installed to `zig-out/<name>.app`: Info.plist and the
-/// executable. `name` is the name people see ("Publr Studio") and the bundle's folder name;
+/// A macOS `.app` around `exe`, installed to `zig-out/<name>.app`: Info.plist, the
+/// executable and, when given, the icon. `name` is the name people see ("Publr Studio") and the bundle's folder name;
 /// `id` is the reverse-DNS identifier ("app.publr.studio"). Signing and notarising come
 /// later, with releases.
 pub fn addAppBundle(
@@ -141,6 +143,8 @@ pub fn addAppBundle(
     options: BundleOptions,
 ) *std.Build.Step {
     const files = b.addWriteFiles();
+    // Local networking covers bare names and IPs only: local sites' admins are on
+    // `admin.localhost:<port>`, plain http, so `localhost` and its subdomains are let in.
     const plist = files.add("Info.plist", b.fmt(
         \\<?xml version="1.0" encoding="UTF-8"?>
         \\<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -157,8 +161,16 @@ pub fn addAppBundle(
         \\  <key>NSPrincipalClass</key><string>NSApplication</string>
         \\  <key>NSHighResolutionCapable</key><true/>
         \\  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
-        \\  <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
-        \\</dict>
+        \\  <key>NSAppTransportSecurity</key><dict>
+        \\    <key>NSAllowsLocalNetworking</key><true/>
+        \\    <key>NSExceptionDomains</key><dict>
+        \\      <key>localhost</key><dict>
+        \\        <key>NSIncludesSubdomains</key><true/>
+        \\        <key>NSExceptionAllowsInsecureHTTPLoads</key><true/>
+        \\      </dict>
+        \\    </dict>
+        \\  </dict>
+        \\{[icon]s}</dict>
         \\</plist>
         \\
     , .{
@@ -167,6 +179,10 @@ pub fn addAppBundle(
         .exe = exe.name,
         .version = options.version,
         .min = options.min_macos,
+        .icon = if (options.icon != null)
+            "  <key>CFBundleIconFile</key><string>AppIcon</string>\n"
+        else
+            "",
     }));
     const app_dir = b.fmt("{s}.app/Contents", .{name});
     const install_plist = b.addInstallFile(plist, b.fmt("{s}/Info.plist", .{app_dir}));
@@ -180,5 +196,12 @@ pub fn addAppBundle(
     const step = b.step("app", b.fmt("Build {s}.app in zig-out", .{name}));
     step.dependOn(&install_plist.step);
     step.dependOn(&install_exe.step);
+
+    if (options.icon) |icon| {
+        const install_icon = b.addInstallFile(icon, b.fmt("{s}/Resources/AppIcon.icns", .{app_dir}));
+
+        step.dependOn(&install_icon.step);
+    }
+
     return step;
 }

@@ -60,6 +60,8 @@ pub const Window = struct {
     handler: Handler,
     display_link: id = null,
     bar_height: f64 = 0,
+    /// The web views start this many points in from the left (`setWebArea`).
+    web_left: f64 = 0,
     closed: bool = false,
     /// A text field of the app's has the keyboard: keys go through the input system.
     text_input: bool = false,
@@ -184,7 +186,7 @@ pub const Window = struct {
         const wk = objc.send(*const fn (id, SEL, objc.CGRect, id) callconv(.c) id)(
             objc.msg(objc.class("WKWebView"), "alloc"),
             objc.sel("initWithFrame:configuration:"),
-            rect(0, 0, bounds.size.w, bounds.size.h - self.bar_height),
+            rect(self.web_left, 0, bounds.size.w - self.web_left, bounds.size.h - self.bar_height),
             config,
         );
         _ = objc.msgUsize(wk, "setAutoresizingMask:", 2 | 16); // width and height sizable
@@ -212,8 +214,29 @@ pub const Window = struct {
         const bounds = objc.msgRect(content, "bounds");
         const h = @min(height, bounds.size.h);
         self.bar_height = h;
+        self.web_left = 0;
         setFrame(self.view, rect(0, bounds.size.h - h, bounds.size.w, h));
         for (self.webs.items) |web| if (!web.fixed) setFrame(web.wk, rect(0, 0, bounds.size.w, bounds.size.h - h));
+        const s = self.size();
+        self.emit(.{ .resize = .{
+            .width = s.w,
+            .height = s.h,
+            .scale = self.scale(),
+        } });
+    }
+
+    /// A `.web` window whose app draws all of it, a sidebar and a bar included: the web views
+    /// lie over it, `left` points in from its left edge and `top` points down from its top.
+    pub fn setWebArea(self: *Window, left: f64, top: f64) void {
+        const content = objc.msg(self.ns_window, "contentView");
+        const bounds = objc.msgRect(content, "bounds");
+        self.bar_height = @min(top, bounds.size.h);
+        self.web_left = @min(left, bounds.size.w);
+        _ = objc.msgUsize(self.view, "setAutoresizingMask:", 2 | 16);
+        setFrame(self.view, rect(0, 0, bounds.size.w, bounds.size.h));
+        const w = bounds.size.w - self.web_left;
+        const h = bounds.size.h - self.bar_height;
+        for (self.webs.items) |web| if (!web.fixed) setFrame(web.wk, rect(self.web_left, 0, w, h));
         const s = self.size();
         self.emit(.{ .resize = .{
             .width = s.w,
@@ -661,6 +684,44 @@ pub fn setMenu(title: [:0]const u8, items: []const MenuItem) void {
         _ = objc.msgUsize(item, "setTag:", it.tag);
         _ = objc.msgUsize(item, "setState:", if (it.checked) 1 else 0);
     }
+}
+
+/// How many items `setAppMenuItems` put in the app menu, so a second call replaces them.
+var app_menu_added: usize = 0;
+
+/// Items of the app's own in the app menu, after About and its separator, with a separator
+/// of their own after them (Settings…, as macOS apps put it). A second call replaces them.
+/// Chosen items go to the `onMenu` handler with their tag.
+pub fn setAppMenuItems(items: []const MenuItem) void {
+    const app = objc.msg(objc.class("NSApplication"), "sharedApplication");
+    const bar = objc.msg(app, "mainMenu");
+    const insert = objc.send(*const fn (id, SEL, id, usize) callconv(.c) void);
+    const app_item = objc.send(*const fn (id, SEL, usize) callconv(.c) id)(bar, objc.sel("itemAtIndex:"), 0);
+    const sub = objc.msg(app_item, "submenu");
+    // About, then its separator: the app's own items go under them.
+    const first: usize = 2;
+    for (0..app_menu_added) |_| {
+        _ = objc.send(*const fn (id, SEL, usize) callconv(.c) void)(sub, objc.sel("removeItemAtIndex:"), first);
+    }
+    var at = first;
+    for (items) |it| {
+        const item = if (it.separator)
+            objc.msg(objc.class("NSMenuItem"), "separatorItem")
+        else blk: {
+            const made = objc.send(*const fn (id, SEL, id, SEL, id) callconv(.c) id)(objc.msg(objc.class("NSMenuItem"), "alloc"), objc.sel("initWithTitle:action:keyEquivalent:"), objc.string(it.title), objc.sel("nativeMenuItem:"), objc.string(it.key));
+            _ = objc.msgId(made, "setTarget:", classes.menu_target_instance);
+            _ = objc.msgUsize(made, "setTag:", it.tag);
+            _ = objc.msgUsize(made, "setState:", if (it.checked) 1 else 0);
+            break :blk made;
+        };
+        insert(sub, objc.sel("insertItem:atIndex:"), item, at);
+        at += 1;
+    }
+    if (items.len > 0) {
+        insert(sub, objc.sel("insertItem:atIndex:"), objc.msg(objc.class("NSMenuItem"), "separatorItem"), at);
+        at += 1;
+    }
+    app_menu_added = at - first;
 }
 
 extern "c" var _dispatch_main_q: anyopaque;

@@ -34,6 +34,8 @@ pub const quit = backend.quit;
 /// App menus with items of the app's own: `setMenu`, chosen items to `onMenu`.
 pub const MenuItem = backend.MenuItem;
 pub const setMenu = backend.setMenu;
+/// Items of the app's own in the app menu, under About (Settings…).
+pub const setAppMenuItems = backend.setAppMenuItems;
 pub const onMenu = backend.onMenu;
 pub const openInBrowser = backend.openInBrowser;
 /// Runs a function on the main thread (where windows live), from any thread.

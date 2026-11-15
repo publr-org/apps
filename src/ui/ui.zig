@@ -273,6 +273,7 @@ pub const Ui = struct {
 
     /// How wide `s` is set in `style`, in points.
     pub fn measure(self: *Ui, s: []const u8, style: TextStyle) f32 {
+        if (!std.unicode.utf8ValidateSlice(s)) return 0;
         const t: m.Text = .{
             .text = s,
             .style = modelStyle(style),
@@ -287,6 +288,8 @@ pub const Ui = struct {
 
     /// One line of text in `r`, centred vertically.
     pub fn text(self: *Ui, r: Rect, s: []const u8, style: TextStyle) !void {
+        // Text that is not UTF-8 is never set: laying it out does not end.
+        if (!std.unicode.utf8ValidateSlice(s)) return;
         const n = try self.node(.text, r);
         n.fills = try self.solid(style.color);
         n.text = .{
