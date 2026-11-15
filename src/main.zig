@@ -231,7 +231,7 @@ pub fn main(init: std.process.Init) !void {
     if (forced) |f| theme = if (std.mem.eql(u8, f, "dark")) &themes.dark else &themes.light;
     theme_forced = forced != null;
 
-    sites.refresh();
+    refreshSites();
     loadRecents();
     name_field = .init(gpa);
     address_field = .init(gpa);
@@ -590,7 +590,7 @@ fn syncSignedOn(signed: @import("cloud.zig").SignedOn) void {
 }
 
 fn syncChanged() void {
-    sites.refresh();
+    refreshSites();
     redrawAll();
 }
 
@@ -1286,7 +1286,7 @@ fn withReturn(url: [:0]const u8) [:0]const u8 {
 fn setView(v: home.View) void {
     view = v;
     scroll = 0;
-    sites.refresh();
+    refreshSites();
 }
 
 /// A folder on Home opened: a linked one is its Cloud project, opened in Cloud's admin
@@ -1324,7 +1324,7 @@ fn act(name: []const u8, tag: u32) void {
         },
         else => {},
     }
-    sites.refresh();
+    refreshSites();
 }
 
 /// The page sent a message (only the timing mode's pages do).
@@ -1768,7 +1768,7 @@ fn deployFinished(job: *deploying.Job) void {
     if (auto_deploy) std.debug.print("studio: deploy finished: {s}{s}\n", .{ job.problem orelse "live at ", if (job.problem == null) job.address else "" });
     // Its page showed how it ended: the card becomes the linked project, nothing more to say.
     if (job.page.len > 0) {
-        sites.refresh();
+        refreshSites();
         cloud.refresh();
         if (job.problem == null) {
             if (sites.find(job.name)) |s| thumbs.take(s.name, s.address);
@@ -1783,7 +1783,7 @@ fn deployFinished(job: *deploying.Job) void {
     if (deployed_address.len > 0) gpa.free(deployed_address);
     deployed_address = gpa.dupe(u8, job.address) catch "";
     open_sheet = .deployed;
-    sites.refresh();
+    refreshSites();
     cloud.refresh();
     if (sites.find(job.name)) |s| thumbs.take(s.name, s.address);
     redrawAll();
@@ -1905,7 +1905,7 @@ const NewSite = struct {
             return redrawAll();
         }
         closeSheet();
-        sites.refresh();
+        refreshSites();
         view = .local;
         openLocal(self.name);
         if (sites.find(self.name)) |s| thumbs.take(s.name, s.address);
@@ -1917,7 +1917,7 @@ const NewSite = struct {
 fn showHome() void {
     if (active) |i| if (i < tabs.items.len) tabs.items[i].web.setVisible(false);
     active = null;
-    sites.refresh();
+    refreshSites();
     window.setBarHeight(window.size().h + 10_000); // the whole window
     window.focusApp();
     redrawAll();
@@ -2215,7 +2215,7 @@ const RemoteJob = struct {
                     pt.note = pt.arena.allocator().dupe(u8, if (self.line.len > 0) self.line else "Clone failed") catch "";
                 } else {
                     pt.note = "";
-                    sites.refresh();
+                    refreshSites();
                     becameLocal(pt);
                 }
             },
@@ -2301,6 +2301,33 @@ fn startClone(pt: *ProjectTab) void {
     startRemote(.clone, pt.live, "");
 }
 
+/// The site list read again, and every open tab told what changed in it.
+fn refreshSites() void {
+    sites.refresh();
+    syncTabs();
+}
+
+/// Each open project's tab as the site list now has it: a folder that went to Cloud (by
+/// Studio or by `publr deploy`) carries its live address, a link taken away leaves it, and a
+/// Cloud project that came to this Mac gets its folder.
+fn syncTabs() void {
+    for (tabs.items) |t| {
+        const pt = t.project orelse continue;
+        if (pt.folder.len == 0) {
+            if (pt.live.len > 0) becameLocal(pt);
+            continue;
+        }
+        const s = sites.find(pt.folder) orelse continue;
+        if (std.mem.eql(u8, s.live, pt.live)) continue;
+        const a = pt.arena.allocator();
+        pt.live = a.dupe(u8, s.live) catch continue;
+        var db: [512]u8 = undefined;
+        const base = if (pt.live.len > 0) pt.live else s.address;
+        pt.apps = project.readApps(io, a, siteDir(&db, pt.folder), base);
+        takeAppThumbs(pt.folder, pt.apps);
+    }
+}
+
 /// A cloned project's tab, now its copy on this Mac: the folder and its own apps.
 fn becameLocal(pt: *ProjectTab) void {
     for (sites.list.items) |s| {
@@ -2347,7 +2374,7 @@ fn onMenu(_: ?*anyopaque, tag: u32) void {
         Tag.home => showHome(),
         Tag.close_tab => if (active) |i| closeTab(i) else window.close(),
         Tag.refresh_sites => {
-            sites.refresh();
+            refreshSites();
             redrawAll();
         },
         Tag.settings => openSettings(),
@@ -2566,7 +2593,7 @@ fn changeConfig(change: *const fn (*core.Config) anyerror!void) void {
     };
     settings_problem = null;
     loadSettings();
-    sites.refresh();
+    refreshSites();
     redrawAll();
 }
 
@@ -2696,7 +2723,7 @@ const ChoosePublr = struct {
             settings_problem = if (job.failed) "That Publr could not be used." else null;
             loadSettings();
         }
-        sites.refresh();
+        refreshSites();
         redrawAll();
     }
 };
