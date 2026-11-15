@@ -218,11 +218,13 @@ pub const Window = struct {
         setFrame(self.view, rect(0, bounds.size.h - h, bounds.size.w, h));
         for (self.webs.items) |web| if (!web.fixed) setFrame(web.wk, rect(0, 0, bounds.size.w, bounds.size.h - h));
         const s = self.size();
-        self.emit(.{ .resize = .{
-            .width = s.w,
-            .height = s.h,
-            .scale = self.scale(),
-        } });
+        self.emit(.{
+            .resize = .{
+                .width = s.w,
+                .height = s.h,
+                .scale = self.scale(),
+            },
+        });
     }
 
     /// A `.web` window whose app draws all of it, a sidebar and a bar included: the web views
@@ -238,11 +240,13 @@ pub const Window = struct {
         const h = bounds.size.h - self.bar_height;
         for (self.webs.items) |web| if (!web.fixed) setFrame(web.wk, rect(self.web_left, 0, w, h));
         const s = self.size();
-        self.emit(.{ .resize = .{
-            .width = s.w,
-            .height = s.h,
-            .scale = self.scale(),
-        } });
+        self.emit(.{
+            .resize = .{
+                .width = s.w,
+                .height = s.h,
+                .scale = self.scale(),
+            },
+        });
     }
 
     /// The content's size in points (a `.web` window with a bar: the bar's).
@@ -774,7 +778,7 @@ fn buildMenuBar(app: id, app_name: [:0]const u8) void {
 }
 
 fn fmt(buf: []u8, comptime f: []const u8, args: anytype) [:0]const u8 {
-    return std.fmt.bufPrintZ(buf, f, args) catch "";
+    return std.fmt.bufPrintSentinel(buf, f, args, 0) catch "";
 }
 
 fn submenu(bar: id, title: [:0]const u8) id {
@@ -862,12 +866,16 @@ fn onFrame(view: id, _: SEL, _: id) callconv(.c) void {
 
 fn onMouseDown(view: id, _: SEL, event: id) callconv(.c) void {
     const w = byView(view) orelse return;
-    w.emit(.{ .mouse_down = mouseEvent(view, event) });
+    w.emit(.{
+        .mouse_down = mouseEvent(view, event),
+    });
 }
 
 fn onMouseUp(view: id, _: SEL, event: id) callconv(.c) void {
     const w = byView(view) orelse return;
-    w.emit(.{ .mouse_up = mouseEvent(view, event) });
+    w.emit(.{
+        .mouse_up = mouseEvent(view, event),
+    });
 }
 
 fn onMouseMove(view: id, _: SEL, event: id) callconv(.c) void {
@@ -875,7 +883,9 @@ fn onMouseMove(view: id, _: SEL, event: id) callconv(.c) void {
     const pressed: usize = @intFromPtr(objc.msg(objc.class("NSEvent"), "pressedMouseButtons"));
     var m = mouseEvent(view, event);
     m.dragging = pressed != 0;
-    w.emit(.{ .mouse_move = m });
+    w.emit(.{
+        .mouse_move = m,
+    });
 }
 
 fn onMouseExit(view: id, _: SEL, _: id) callconv(.c) void {
@@ -887,25 +897,29 @@ fn onScroll(view: id, _: SEL, event: id) callconv(.c) void {
     const w = byView(view) orelse return;
     const p = point(view, event);
     const phase: usize = @intFromPtr(objc.msg(event, "momentumPhase"));
-    w.emit(.{ .scroll = .{
-        .x = p.x,
-        .y = p.y,
-        .dx = objc.msgF64(event, "scrollingDeltaX"),
-        .dy = objc.msgF64(event, "scrollingDeltaY"),
-        .precise = objc.send(*const fn (id, SEL) callconv(.c) bool)(event, objc.sel("hasPreciseScrollingDeltas")),
-        .momentum = phase != 0,
-        .mods = mods(event),
-    } });
+    w.emit(.{
+        .scroll = .{
+            .x = p.x,
+            .y = p.y,
+            .dx = objc.msgF64(event, "scrollingDeltaX"),
+            .dy = objc.msgF64(event, "scrollingDeltaY"),
+            .precise = objc.send(*const fn (id, SEL) callconv(.c) bool)(event, objc.sel("hasPreciseScrollingDeltas")),
+            .momentum = phase != 0,
+            .mods = mods(event),
+        },
+    });
 }
 
 fn onMagnify(view: id, _: SEL, event: id) callconv(.c) void {
     const w = byView(view) orelse return;
     const p = point(view, event);
-    w.emit(.{ .magnify = .{
-        .x = p.x,
-        .y = p.y,
-        .amount = objc.msgF64(event, "magnification"),
-    } });
+    w.emit(.{
+        .magnify = .{
+            .x = p.x,
+            .y = p.y,
+            .amount = objc.msgF64(event, "magnification"),
+        },
+    });
 }
 
 fn keyEvent(event: id) ev.Key {
@@ -958,7 +972,9 @@ fn onKeyDown(view: id, _: SEL, event: id) callconv(.c) void {
         _ = objc.msgId(view, "interpretKeyEvents:", events);
         return;
     }
-    w.emit(.{ .key_down = keyEvent(event) });
+    w.emit(.{
+        .key_down = keyEvent(event),
+    });
 }
 
 const NSRange = extern struct {
@@ -978,20 +994,26 @@ fn plainText(obj: id) []const u8 {
 fn onInsertText(view: id, _: SEL, text: id, _: NSRange) callconv(.c) void {
     const w = byView(view) orelse return;
     w.marked = false;
-    w.emit(.{ .text = ev.Text.of(.insert, plainText(text)) });
+    w.emit(.{
+        .text = ev.Text.of(.insert, plainText(text)),
+    });
 }
 
 fn onSetMarked(view: id, _: SEL, text: id, _: NSRange, _: NSRange) callconv(.c) void {
     const w = byView(view) orelse return;
     const t = plainText(text);
     w.marked = t.len > 0;
-    w.emit(.{ .text = ev.Text.of(.marked, t) });
+    w.emit(.{
+        .text = ev.Text.of(.marked, t),
+    });
 }
 
 fn onUnmark(view: id, _: SEL) callconv(.c) void {
     const w = byView(view) orelse return;
     w.marked = false;
-    w.emit(.{ .text = ev.Text.of(.marked, "") });
+    w.emit(.{
+        .text = ev.Text.of(.marked, ""),
+    });
 }
 
 fn onHasMarked(view: id, _: SEL) callconv(.c) bool {
@@ -1043,7 +1065,10 @@ fn onFirstRect(view: id, _: SEL, _: NSRange, _: ?*NSRange) callconv(.c) objc.CGR
 fn onCommand(view: id, _: SEL, selector: SEL) callconv(.c) void {
     const w = byView(view) orelse return;
     const name = std.mem.span(objc.sel_getName(selector));
-    const commands = [_]struct { []const u8, ev.TextCommand }{
+    const commands = [_]struct {
+        []const u8,
+        ev.TextCommand,
+    }{
         .{ "deleteBackward:", .delete_backward },
         .{ "deleteForward:", .delete_forward },
         .{ "deleteWordBackward:", .delete_word_backward },
@@ -1071,27 +1096,37 @@ fn onCommand(view: id, _: SEL, selector: SEL) callconv(.c) void {
         .{ "insertBacktab:", .backtab },
         .{ "cancelOperation:", .escape },
     };
-    for (commands) |c| if (std.mem.eql(u8, name, c[0])) return w.emit(.{ .text_command = c[1] });
+    for (commands) |c| if (std.mem.eql(u8, name, c[0])) return w.emit(.{
+        .text_command = c[1],
+    });
 }
 
 fn onCopy(view: id, _: SEL, _: id) callconv(.c) void {
     const w = byView(view) orelse return;
-    w.emit(.{ .text_command = .copy });
+    w.emit(.{
+        .text_command = .copy,
+    });
 }
 
 fn onCut(view: id, _: SEL, _: id) callconv(.c) void {
     const w = byView(view) orelse return;
-    w.emit(.{ .text_command = .cut });
+    w.emit(.{
+        .text_command = .cut,
+    });
 }
 
 fn onPaste(view: id, _: SEL, _: id) callconv(.c) void {
     const w = byView(view) orelse return;
-    w.emit(.{ .text_command = .paste });
+    w.emit(.{
+        .text_command = .paste,
+    });
 }
 
 fn onSelectAll(view: id, _: SEL, _: id) callconv(.c) void {
     const w = byView(view) orelse return;
-    w.emit(.{ .text_command = .select_all });
+    w.emit(.{
+        .text_command = .select_all,
+    });
 }
 
 /// The text on the clipboard (owned by the caller), or null.
@@ -1116,12 +1151,16 @@ pub fn setClipboardText(text: []const u8) void {
 
 fn onKeyUp(view: id, _: SEL, event: id) callconv(.c) void {
     const w = byView(view) orelse return;
-    w.emit(.{ .key_up = keyEvent(event) });
+    w.emit(.{
+        .key_up = keyEvent(event),
+    });
 }
 
 fn onFlags(view: id, _: SEL, event: id) callconv(.c) void {
     const w = byView(view) orelse return;
-    w.emit(.{ .modifiers = mods(event) });
+    w.emit(.{
+        .modifiers = mods(event),
+    });
 }
 
 fn notificationWindow(note: id) ?*Window {
@@ -1132,21 +1171,27 @@ fn onResize(_: id, _: SEL, note: id) callconv(.c) void {
     const w = notificationWindow(note) orelse return;
     if (w.layer != null) setF64(w.layer, "setContentsScale:", w.scale());
     const s = w.size();
-    w.emit(.{ .resize = .{
-        .width = s.w,
-        .height = s.h,
-        .scale = w.scale(),
-    } });
+    w.emit(.{
+        .resize = .{
+            .width = s.w,
+            .height = s.h,
+            .scale = w.scale(),
+        },
+    });
 }
 
 fn onFocus(_: id, _: SEL, note: id) callconv(.c) void {
     const w = notificationWindow(note) orelse return;
-    w.emit(.{ .focus = true });
+    w.emit(.{
+        .focus = true,
+    });
 }
 
 fn onBlur(_: id, _: SEL, note: id) callconv(.c) void {
     const w = notificationWindow(note) orelse return;
-    w.emit(.{ .focus = false });
+    w.emit(.{
+        .focus = false,
+    });
 }
 
 fn onClose(_: id, _: SEL, note: id) callconv(.c) void {
@@ -1198,7 +1243,9 @@ fn onAppearanceChanged(_: id, _: SEL, _: id) callconv(.c) void {
 
 fn tellAppearance(_: ?*anyopaque) callconv(.c) void {
     const a = appearance();
-    for (windows.items) |w| w.emit(.{ .appearance = a });
+    for (windows.items) |w| w.emit(.{
+        .appearance = a,
+    });
 }
 
 fn onMenuItem(_: id, _: SEL, sender: id) callconv(.c) void {

@@ -200,7 +200,7 @@ pub const Host = struct {
     dummy_view: c.WGPUTextureView,
     dummy_group: c.WGPUBindGroup,
     backdrop_tex: c.WGPUTexture = null,
-    bufs: [Buf.count]?BufEntry = .{null} ** Buf.count,
+    bufs: [Buf.count]?BufEntry = @splat(null),
     slot_buf: c.WGPUBuffer,
     slot_buf_size: u64,
     slots: std.ArrayList(u8) = .empty,
@@ -243,7 +243,7 @@ pub const Host = struct {
         covers,
         present,
 
-        const count = @typeInfo(Buf).@"enum".fields.len;
+        const count = @typeInfo(Buf).@"enum".field_names.len;
     };
 
     const BufEntry = struct {
@@ -477,7 +477,7 @@ pub const Host = struct {
     // ------------------------------------------------------------------ resources
 
     fn buffer(self: *Host, which: Buf, bytes: u64, usage: c.WGPUBufferUsage) c.WGPUBuffer {
-        const slot = &self.bufs[@intFromEnum(which)];
+        const slot = &self.bufs[@backingInt(which)];
         if (slot.*) |b| if (b.size >= bytes) return b.buffer;
         if (slot.*) |b| self.doomBuffer(b.buffer);
         var size: u64 = 4096;
@@ -826,7 +826,12 @@ pub const Host = struct {
         var pending: u32 = 0;
         const cx = @as(f64, @floatFromInt(tw)) / 2;
         const cy = @as(f64, @floatFromInt(th)) / 2;
-        for (scene.fallbacks.items, scene.fallback_ids.items, scene.fallback_revs.items, 0..) |fb, fid, frev, fi| {
+        for (
+            scene.fallbacks.items,
+            scene.fallback_ids.items,
+            scene.fallback_revs.items,
+            0..,
+        ) |fb, fid, frev, fi| {
             fb_draws[fi] = .empty;
             const list = &fb_draws[fi];
             // The node's content revision is in the key: new content under the same id (a
@@ -1321,22 +1326,22 @@ pub const Host = struct {
                         }
                     };
                     switch (kind) {
-                        @intFromEnum(sc.PassKind.gauss), @intFromEnum(sc.PassKind.progressive), @intFromEnum(sc.PassKind.spread) => {
+                        @backingInt(sc.PassKind.gauss), @backingInt(sc.PassKind.progressive), @backingInt(sc.PassKind.spread) => {
                             const entry: usize = switch (kind) {
-                                @intFromEnum(sc.PassKind.gauss) => 0,
-                                @intFromEnum(sc.PassKind.progressive) => 2,
+                                @backingInt(sc.PassKind.gauss) => 0,
+                                @backingInt(sc.PassKind.progressive) => 2,
                                 else => 3,
                             };
                             try Fx.dispatch(self, &steps, arena, pr, size, entry, dst_tex, tmp, 0, 0, false);
                             try Fx.dispatch(self, &steps, arena, pr, size, entry, tmp, dst_tex, 1, 0, false);
                         },
-                        @intFromEnum(sc.PassKind.box3) => {
+                        @backingInt(sc.PassKind.box3) => {
                             for (0..3) |b| {
                                 try Fx.dispatch(self, &steps, arena, pr, size, 1, dst_tex, tmp, 0, @intCast(b), true);
                                 try Fx.dispatch(self, &steps, arena, pr, size, 1, tmp, dst_tex, 1, @intCast(b), true);
                             }
                         },
-                        @intFromEnum(sc.PassKind.noise), @intFromEnum(sc.PassKind.texture) => {
+                        @backingInt(sc.PassKind.noise), @backingInt(sc.PassKind.texture) => {
                             const src_tex = if (pr.src != none) surf_tex[pr.src] else null;
                             if (src_tex == null) continue;
                             try steps.append(arena, .{
@@ -1349,9 +1354,9 @@ pub const Host = struct {
                                     .h = c.wgpuTextureGetHeight(src_tex),
                                 },
                             });
-                            try Fx.dispatch(self, &steps, arena, pr, size, if (kind == @intFromEnum(sc.PassKind.noise)) 4 else 5, tmp, dst_tex, 0, 0, false);
+                            try Fx.dispatch(self, &steps, arena, pr, size, if (kind == @backingInt(sc.PassKind.noise)) 4 else 5, tmp, dst_tex, 0, 0, false);
                         },
-                        @intFromEnum(sc.PassKind.backdrop) => {
+                        @backingInt(sc.PassKind.backdrop) => {
                             const t = rec.top();
                             if (!t.cleared) {
                                 try rec.ensure();

@@ -2,7 +2,7 @@
     .name = .publr_native,
     .version = "0.0.0",
     .fingerprint = 0xf50dac7002d242e7,
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .publr_icons = .{
             .path = "../icons",

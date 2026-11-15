@@ -183,7 +183,7 @@ fn dupe(a: std.mem.Allocator, v: anytype) std.mem.Allocator.Error!@TypeOf(v) {
         },
         .@"struct" => |st| {
             var out: T = v;
-            inline for (st.fields) |f| @field(out, f.name) = try dupe(a, @field(v, f.name));
+            inline for (st.field_names) |f_name| @field(out, f_name) = try dupe(a, @field(v, f_name));
             return out;
         },
         .@"union" => |u| {
@@ -199,9 +199,9 @@ fn dupe(a: std.mem.Allocator, v: anytype) std.mem.Allocator.Error!@TypeOf(v) {
 /// A node's own content: every field but its place and children (hashed by `mark`) and
 /// its revisions (made from this).
 fn hashOwn(h: *Wyhash, n: *const m.Node) void {
-    inline for (@typeInfo(m.Node).@"struct".fields) |f| {
-        if (comptime std.mem.eql(u8, f.name, "children") or std.mem.eql(u8, f.name, "transform") or std.mem.eql(u8, f.name, "rev") or std.mem.eql(u8, f.name, "tree_rev")) continue;
-        hashValue(h, @field(n.*, f.name));
+    inline for (comptime std.meta.fieldNames(m.Node)) |f_name| {
+        if (comptime std.mem.eql(u8, f_name, "children") or std.mem.eql(u8, f_name, "transform") or std.mem.eql(u8, f_name, "rev") or std.mem.eql(u8, f_name, "tree_rev")) continue;
+        hashValue(h, @field(n.*, f_name));
     }
 }
 
@@ -224,10 +224,10 @@ fn hashValue(h: *Wyhash, v: anytype) void {
             else => @compileError("ui: cannot hash " ++ @typeName(T)),
         },
         .array => for (v) |x| hashValue(h, x),
-        .@"struct" => |s| inline for (s.fields) |f| hashValue(h, @field(v, f.name)),
+        .@"struct" => |s| inline for (s.field_names) |f_name| hashValue(h, @field(v, f_name)),
         .@"union" => |u| {
             if (u.tag_type == null) @compileError("ui: cannot hash " ++ @typeName(T));
-            h.update(std.mem.asBytes(&@intFromEnum(std.meta.activeTag(v))));
+            h.update(std.mem.asBytes(&@backingInt(std.meta.activeTag(v))));
             switch (v) {
                 inline else => |x| hashValue(h, x),
             }

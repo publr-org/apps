@@ -446,15 +446,15 @@ test "every Publr icon can be read" {
     const icons = @import("publr_icons");
     var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
     defer arena.deinit();
-    inline for (@typeInfo(icons).@"struct".decls) |d| {
-        const v = @field(icons, d.name);
+    inline for (@typeInfo(icons).@"struct".decl_names) |d_name| {
+        const v = @field(icons, d_name);
         if (@TypeOf(v) == []const u8 and std.mem.indexOfScalar(u8, v, '<') != null) {
             const s = shapes(arena.allocator(), v) catch |e| {
-                std.debug.print("icon {s}: {}\n", .{ d.name, e });
+                std.debug.print("icon {s}: {}\n", .{ d_name, e });
                 return e;
             };
             if (s.len == 0) {
-                std.debug.print("icon {s}: no shapes\n", .{d.name});
+                std.debug.print("icon {s}: no shapes\n", .{d_name});
                 return error.NoShapes;
             }
         }
