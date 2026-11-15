@@ -1,8 +1,8 @@
 //! Publr Studio: one window, a tab per open site. The bar and Home (every site, laid out
 //! as PublrDesign's file browser) are drawn by Studio itself with the native `ui`; each
 //! tab is the site's admin, signed in, in the system's web view. Local sites, their
-//! servers and the signed-in links are `p`'s (`~/publr-sites`) until the `studio` plugin
-//! takes them over (`.agents/specs/publr-studio.md`).
+//! servers and the signed-in links come from the `publr` command's core (`publr_cli`), the
+//! same folders the command lists (`.agents/specs/publr-cli.md`).
 
 const std = @import("std");
 const native = @import("native");
@@ -10,10 +10,15 @@ const ui = @import("ui");
 const bar = @import("bar.zig");
 const home = @import("home.zig");
 const syncing = @import("sync.zig");
+const project = @import("project.zig");
 const themes = @import("theme.zig");
-const Sites = @import("sites.zig").Sites;
+const core = @import("publr_cli");
+const sites_module = @import("sites.zig");
+const remote = @import("remote.zig");
+const Sites = sites_module.Sites;
 const Thumbs = @import("thumbs.zig").Thumbs;
 const sheet = @import("sheet.zig");
+const settings = @import("settings.zig");
 const Cloud = @import("cloud.zig").Cloud;
 const deploying = @import("deploy.zig");
 
@@ -28,6 +33,7 @@ const Tag = struct {
     const home = 3;
     const close_tab = 4;
     const refresh_sites = 5;
+    const settings = 6;
     /// Command-1 to Command-9.
     const tab = 10;
 };
@@ -52,6 +58,7 @@ const Action = struct {
     // The account's.
     const open_dashboard = 21;
     const sign_out = 22;
+    const settings = 23;
 };
 
 /// What a Home item is.
@@ -68,12 +75,41 @@ const Tab = struct {
     web: *native.WebView,
     /// A Cloud project's tab: its admin's address (a local site's tab signs in through `p`).
     url: ?[]const u8 = null,
+    /// A project's tab: its page under a strip (Overview, Admin, Site, its apps).
+    project: ?*ProjectTab = null,
+};
+
+/// What a project's tab is: its folder on this Mac and its address on Cloud (either may be
+/// empty), and what it shows.
+const ProjectTab = struct {
+    arena: std.heap.ArenaAllocator,
+    folder: []const u8 = "",
+    live: []const u8 = "",
+    space: []const u8 = "",
+    apps: []const project.App = &.{},
+    page: project.Page = .overview,
+    /// Signed in to its Cloud admin in this tab already (one sign-on a tab).
+    signed: bool = false,
+    /// Its "more" menu is open.
+    menu_open: bool = false,
+    /// How far its Overview is scrolled.
+    scroll: f32 = 0,
+    /// Its Advanced details are unfolded (for this run only).
+    advanced: bool = false,
+    /// Being cloned to this Mac now.
+    cloning: bool = false,
+    /// Its apps being asked of the Publr it lives on.
+    apps_loading: bool = false,
+    /// What the last clone said when it failed; shown in place of the status.
+    note: []const u8 = "",
 };
 
 const Hover = union(enum) {
     none,
     bar: bar.Target,
     home: home.Target,
+    project: project.Target,
+    settings: settings.Target,
 };
 
 var gpa: std.mem.Allocator = undefined;
@@ -181,7 +217,7 @@ pub fn main(init: std.process.Init) !void {
         .gpa = gpa,
         .io = io,
         .env = env,
-        .p_path = env.get("STUDIO_P") orelse try std.fs.path.join(gpa, &.{ home_dir, ".local/bin/p" }),
+        .command_path = sites_module.commandPath(gpa, io, env),
     };
     support_dir = try std.fs.path.join(gpa, &.{ home_dir, "Library/Application Support/Publr Studio" });
     Io.Dir.cwd().createDirPath(io, support_dir) catch {};
@@ -206,8 +242,7 @@ pub fn main(init: std.process.Init) !void {
         .gpa = gpa,
         .io = io,
         .env = env,
-        .publr = publrPath(gpa),
-        .p_path = sites.p_path,
+        .publr = sites.command_path,
         .sign_on = syncSignOn,
         .changed = syncChanged,
         .running = siteRunning,
@@ -274,9 +309,41 @@ pub fn main(init: std.process.Init) !void {
             };
         }
     }
+    // `STUDIO_VIEW=settings[-advanced]`: Home on its Settings page (for screenshots).
+    if (env.get("STUDIO_VIEW")) |v| if (std.mem.startsWith(u8, v, "settings")) {
+        if (active == null) showHome();
+        openSettings();
+        settings_advanced = std.mem.endsWith(u8, v, "-advanced");
+    };
+    // `--open <folder>` (`publr studio <name>`): that site's tab.
+    if (openArg(init)) |folder| if (sites.atFolder(folder)) |s| openLocal(s.name);
+    // `STUDIO_OPEN_LIVE=<address>`: a project elsewhere opened, as a Cloud project is (tests).
+    if (env.get("STUDIO_OPEN_LIVE")) |live| {
+        openProjectTab(hostOf(live), "", live, "");
+        // `STUDIO_VIEW=clone`: its Clone to this Mac pressed.
+        if (env.get("STUDIO_VIEW")) |v| if (std.mem.eql(u8, v, "clone")) {
+            if (active) |i| if (tabs.items[i].project) |pt| startClone(pt);
+        };
+    }
+    // `STUDIO_VIEW=project-advanced`: the opened project's Advanced unfolded (screenshots).
+    if (env.get("STUDIO_VIEW")) |v| if (std.mem.eql(u8, v, "project-advanced")) {
+        if (active) |i| if (tabs.items[i].project) |pt| {
+            pt.advanced = true;
+            pt.scroll = project.maxScroll(projectPage(i));
+        };
+    };
     if (env.get("STUDIO_SIGN_IN") != null and cloud.status == .signed_out) cloud.signIn();
     if (self_test) std.debug.print("studio: window {d}, {d} sites, {d} tabs\n", .{ window.number(), sites.list.items.len, tabs.items.len });
     native.run();
+}
+
+/// The folder after `--open` among Studio's arguments, or null.
+fn openArg(init: std.process.Init) ?[]const u8 {
+    const args = init.minimal.args.toSlice(init.arena.allocator()) catch return null;
+    for (args, 0..) |arg, i| {
+        if (std.mem.eql(u8, arg, "--open") and i + 1 < args.len) return args[i + 1];
+    }
+    return null;
 }
 
 fn themeFor(a: native.Appearance) *const themes.Theme {
@@ -284,6 +351,13 @@ fn themeFor(a: native.Appearance) *const themes.Theme {
 }
 
 fn buildMenus() void {
+    native.setAppMenuItems(&.{
+        .{
+            .title = "Settings…",
+            .key = ",",
+            .tag = Tag.settings,
+        },
+    });
     native.setMenu("File", &.{
         .{
             .title = "Home",
@@ -356,8 +430,12 @@ fn viewItems() []const home.Item {
         .all => {
             for (sites.list.items) |s| addLocal(a, s.name);
             addUnlinked(a, null);
+            groupItems(a);
         },
-        .local => for (sites.list.items) |s| addLocal(a, s.name),
+        .local => {
+            for (sites.list.items) |s| addLocal(a, s.name);
+            groupItems(a);
+        },
         .cloud => {
             for (sites.list.items) |s| if (linkedProject(s) != null) addLocal(a, s.name);
             addUnlinked(a, null);
@@ -366,8 +444,23 @@ fn viewItems() []const home.Item {
             for (sites.list.items) |s| if (linkedProject(s)) |at| if (at.space == i) addLocal(a, s.name);
             addUnlinked(a, i);
         },
+        .settings => {},
     }
     return items.items;
+}
+
+/// Each item's section: the folder its site is in (a folder of sites, or the folder that
+/// holds a single site), Cloud's projects under On Cloud. The site list comes by folder
+/// already, the default one first.
+fn groupItems(a: std.mem.Allocator) void {
+    for (items.items, item_refs.items) |*it, ref| switch (ref) {
+        .local => |name| {
+            const s = sites.find(name) orelse continue;
+            const where = if (std.mem.eql(u8, s.entry, s.folder)) std.fs.path.dirname(s.folder) orelse s.folder else s.entry;
+            it.group = shortFolder(a, where);
+        },
+        .cloud => it.group = "On Cloud",
+    };
 }
 
 const ProjectAt = struct {
@@ -406,7 +499,7 @@ fn addUnlinked(a: std.mem.Allocator, only: ?usize) void {
 fn addLocal(a: std.mem.Allocator, name: []const u8) void {
     const s = sites.find(name) orelse return;
     // A folder linked to a Cloud project is that project: one card, marked as both, saying
-    // whether this Mac is in step with Cloud. `sync.zig` keeps the folder so.
+    // whether this Mac is in sync with Cloud. `sync.zig` keeps the folder so.
     const linked = s.live.len > 0;
     var state: syncing.State = .checking;
     if (linked) {
@@ -425,11 +518,45 @@ fn addLocal(a: std.mem.Allocator, name: []const u8) void {
         .changed = linked and (state == .unsent or state == .waiting),
         .thumb = thumb,
     }) catch return;
-    item_refs.append(gpa, .{ .local = s.name }) catch {};
+    item_refs.append(gpa, .{ .local = intern(s.name) }) catch {};
 }
 
+/// Site names kept for as long as Studio runs: what a card or an open menu holds stays
+/// valid when the site list is read again (which frees the list's own copies).
+var interned: std.StringHashMapUnmanaged(void) = .empty;
+
+fn intern(name: []const u8) []const u8 {
+    if (interned.getKey(name)) |kept| return kept;
+    const kept = gpa.dupe(u8, name) catch return "";
+    interned.put(gpa, kept, {}) catch return kept;
+    return kept;
+}
+
+/// The site's folder, copied into `buf` (the list's own copy is freed when it is read again).
 fn siteDir(buf: []u8, name: []const u8) []const u8 {
-    return std.fmt.bufPrint(buf, "{s}/publr-sites/{s}", .{ home_dir, name }) catch "";
+    const folder = sites.folderOf(name);
+    if (folder.len > buf.len) return "";
+    @memcpy(buf[0..folder.len], folder);
+    return buf[0..folder.len];
+}
+
+/// A folder as people read it (`~/Publr/shop`), in `a`.
+fn shortFolder(a: std.mem.Allocator, folder: []const u8) []const u8 {
+    var buf: [1024]u8 = undefined;
+    return a.dupe(u8, sites_module.shortPath(&buf, home_dir, folder)) catch "";
+}
+
+/// A build's path as people read it; empty stays empty (no build chosen).
+fn shortBuild(a: std.mem.Allocator, path: []const u8) []const u8 {
+    return if (path.len == 0) "" else shortFolder(a, path);
+}
+
+/// The site's folder in the Finder.
+fn showInFinder(name: []const u8) void {
+    var buf: [1024]u8 = undefined;
+    const folder = sites.folderOf(name);
+    if (folder.len == 0) return;
+    native.openInBrowser(std.fmt.bufPrintZ(&buf, "file://{s}", .{folder}) catch return);
 }
 
 fn siteRunning(name: []const u8) bool {
@@ -561,6 +688,7 @@ fn homeState() home.State {
             .local => "On this Mac",
             .cloud => "On Cloud",
             .space => |i| if (i < cloud.spaces.len) cloud.spaces[i].name else "On Cloud",
+            .settings => "Settings",
         },
     };
     if (menu) |m| st.menu = .{
@@ -620,6 +748,10 @@ fn accountMenu() []const home.MenuItem {
         .{
             .title = "Open dashboard",
             .tag = Action.open_dashboard,
+        },
+        .{
+            .title = "Settings…",
+            .tag = Action.settings,
         },
         .{
             .separator = true,
@@ -748,7 +880,16 @@ fn onEvent(_: ?*anyopaque, win: *native.Window, event: native.Event) void {
         },
         .mouse_move => |m| setHover(win, hitAt(m.x, m.y)),
         .mouse_leave => setHover(win, .none),
-        .scroll => |sc| if (active == null and menu == null) {
+        .scroll => |sc| if (active) |i| {
+            const pt = tabs.items[i].project orelse return;
+            if (pt.page != .overview or pt.menu_open) return;
+            const dy: f32 = @floatCast(if (sc.precise) sc.dy else sc.dy * 10);
+            const next = std.math.clamp(pt.scroll - dy, 0, project.maxScroll(projectPage(i)));
+            if (next != pt.scroll) {
+                pt.scroll = next;
+                redrawAll();
+            }
+        } else if (menu == null) {
             const max = home.maxScroll(homeState());
             const dy: f32 = @floatCast(if (sc.precise) sc.dy else sc.dy * 10);
             const next = std.math.clamp(scroll - dy, 0, max);
@@ -757,7 +898,10 @@ fn onEvent(_: ?*anyopaque, win: *native.Window, event: native.Event) void {
                 redrawAll();
             }
         },
-        .key_down => |k| if (k.code == .escape and menu != null) {
+        .key_down => |k| if (k.code == .escape) {
+            if (active) |i| if (tabs.items[i].project) |pt| {
+                pt.menu_open = false;
+            };
             menu = null;
             redrawAll();
         },
@@ -772,7 +916,15 @@ fn hitAt(x: f64, y: f64) Hover {
         const t = bar.hit(barState(&titles), x, y);
         return if (t == .none) .none else .{ .bar = t };
     }
-    if (active != null) return .none;
+    if (active) |i| {
+        if (tabs.items[i].project == null) return .none;
+        const pt = project.hit(projectPage(i), u, x, y);
+        return if (pt == .none) .none else .{ .project = pt };
+    }
+    if (view == .settings and x >= home.sidebar_width and menu == null) {
+        const st = settings.hit(settingsState(), u, x, y);
+        return if (st == .none) .none else .{ .settings = st };
+    }
     const t = home.hit(homeState(), u, x, y);
     return if (t == .none) .none else .{ .home = t };
 }
@@ -790,6 +942,7 @@ fn setHover(win: *native.Window, h: Hover) void {
             .none, .outside_menu => .arrow,
             else => .pointer,
         },
+        .project, .settings => .pointer,
         .none => .arrow,
     });
 }
@@ -808,6 +961,8 @@ fn click(win: *native.Window, m: native.event.Mouse) void {
             .none => {},
         },
         .home => |t| clickHome(t, m),
+        .project => |t| if (active) |i| clickProject(i, t),
+        .settings => |t| clickSettings(t),
     }
 }
 
@@ -831,6 +986,7 @@ fn clickHome(t: home.Target, m: native.event.Mouse) void {
         .local => setView(.local),
         .cloud => setView(.cloud),
         .space => |i| setView(.{ .space = i }),
+        .settings => openSettings(),
         .show_grid => layout = .grid,
         .show_list => layout = .list,
         .item => |i| {
@@ -884,46 +1040,166 @@ fn actAccount(tag: u32) void {
             cloud.signOut();
             if (view == .space or view == .cloud) view = .all;
         },
+        Action.settings => openSettings(),
         else => {},
     }
 }
 
-/// A Cloud project's admin in a tab of its own: `<slug>--admin.<domain>/admin`, where the
-/// person signs in to it (Cloud's sign-on for Studio comes later).
+/// A Cloud project's own tab, on its Overview.
 fn openProject(space: usize, k: usize) void {
+    // The list may have been read again since Home was drawn.
+    if (space >= cloud.spaces.len or k >= cloud.spaces[space].projects.len) return;
     const p = cloud.spaces[space].projects[k];
-    openProjectAdmin(p.name, p.address);
+    var folder: []const u8 = "";
+    for (sites.list.items) |s| if (s.live.len > 0 and std.mem.eql(u8, hostOf(s.live), hostOf(p.address))) {
+        folder = s.name;
+    };
+    openProjectTab(p.name, folder, p.address, cloud.spaces[space].name);
 }
 
-/// A Cloud project's admin in a tab of its own (its tab again when open): `<slug>--admin`,
-/// signed in as the member through a one-time sign-on Cloud gives Studio, so the tab never
-/// asks for the dashboard's password.
-fn openProjectAdmin(name: []const u8, address: []const u8) void {
-    for (tabs.items, 0..) |t, i| if (t.url != null and std.mem.eql(u8, t.name, name)) return showTab(i);
-    const host = hostOf(address);
-    const dot = std.mem.indexOfScalar(u8, host, '.') orelse return;
-    const scheme = if (std.mem.startsWith(u8, address, "http://")) "http" else "https";
-    const url = std.fmt.allocPrintSentinel(gpa, "{s}://{s}--admin{s}/admin", .{ scheme, host[0..dot], host[dot..] }, 0) catch return;
+/// A project's tab (its tab again when open), on its Overview: `folder` is its folder on
+/// this Mac and `live` its Cloud address, either empty.
+fn openProjectTab(name: []const u8, folder: []const u8, live: []const u8, space: []const u8) void {
+    if (projectTabOf(folder, live)) |i| return showTab(i);
     const web = window.addWebView() catch return;
+    const pt = gpa.create(ProjectTab) catch return;
+    pt.* = .{
+        .arena = .init(gpa),
+    };
+    const a = pt.arena.allocator();
+    pt.folder = a.dupe(u8, folder) catch "";
+    pt.live = a.dupe(u8, live) catch "";
+    pt.space = a.dupe(u8, space) catch "";
+    if (folder.len > 0) {
+        var db: [512]u8 = undefined;
+        const local = sites.find(folder);
+        // The tab's own copies: the site list's are freed whenever it is read again.
+        const base = if (pt.live.len > 0) pt.live else if (local) |s| a.dupe(u8, s.address) catch "" else "";
+        pt.apps = project.readApps(io, a, siteDir(&db, folder), base);
+        rememberRecent(folder);
+        takeAppThumbs(folder, pt.apps);
+    } else if (pt.live.len > 0) {
+        pt.apps_loading = true;
+        startRemote(.apps, pt.live, "");
+    }
     tabs.append(gpa, .{
         .name = gpa.dupe(u8, name) catch return,
         .web = web,
-        .url = url,
+        .url = if (live.len > 0) adminOf(live) else null,
+        .project = pt,
     }) catch return;
     showTab(tabs.items.len - 1);
-    cloud.signOnTo(host[0..dot], signedOn);
+}
+
+/// An app's picture's name: its project's folder and its own.
+fn appThumbName(buf: []u8, folder: []const u8, app: []const u8) []const u8 {
+    return std.fmt.bufPrint(buf, "app-{s}-{s}", .{ folder, app }) catch "";
+}
+
+/// Each app's picture: the one kept from before at once, a new one taken off screen.
+fn takeAppThumbs(folder: []const u8, apps: []const project.App) void {
+    var names: [32][]const u8 = undefined;
+    var bufs: [32][256]u8 = undefined;
+    const n = @min(apps.len, names.len);
+    for (apps[0..n], 0..) |app, k| names[k] = appThumbName(&bufs[k], folder, app.name);
+    thumbs.loadSaved(names[0..n]);
+    for (apps[0..n], 0..) |app, k| if (app.address.len > 0) thumbs.take(names[k], app.address);
+}
+
+fn projectTabOf(folder: []const u8, live: []const u8) ?usize {
+    for (tabs.items, 0..) |t, i| {
+        const pt = t.project orelse continue;
+        if (folder.len > 0 and std.mem.eql(u8, pt.folder, folder)) return i;
+        if (live.len > 0 and pt.live.len > 0 and std.mem.eql(u8, hostOf(pt.live), hostOf(live))) return i;
+    }
+    return null;
+}
+
+/// A Cloud project's admin address: `<slug>--admin.<domain>/admin`.
+fn adminOf(live: []const u8) ?[]const u8 {
+    const host = hostOf(live);
+    const dot = std.mem.indexOfScalar(u8, host, '.') orelse return null;
+    const scheme = if (std.mem.startsWith(u8, live, "http://")) "http" else "https";
+    return std.fmt.allocPrint(gpa, "{s}://{s}--admin{s}/admin", .{ scheme, host[0..dot], host[dot..] }) catch null;
+}
+
+/// A Cloud project's admin, its tab opened on it: kept for the places that name a project
+/// by its address alone (a project just made).
+fn openProjectAdmin(name: []const u8, address: []const u8) void {
+    openProjectTab(name, "", address, "");
+    if (active) |i| goTo(i, .admin);
 }
 
 /// The page where the folder's sent work is reviewed, in the project's tab, signed in.
 fn openReview(name: []const u8, address: []const u8) void {
     const review = syncing.reviewOf(name) orelse return;
-    const path = pathOf(review);
-    for (tabs.items, 0..) |t, i| if (t.url != null and std.mem.eql(u8, t.name, name)) {
-        t.web.loadUrl(frame_arena.allocator().dupeZ(u8, review) catch return);
-        return showTab(i);
+    openProjectTab(name, name, address, spaceOf(address));
+    const i = active orelse return;
+    adminAt(i, pathOf(review), review);
+}
+
+/// The tab `i` on `page`: Overview drawn here, the rest loaded in its web view.
+fn goTo(i: usize, page: project.Page) void {
+    const t = tabs.items[i];
+    const pt = t.project orelse return;
+    pt.page = page;
+    switch (page) {
+        .overview => {},
+        .admin => adminAt(i, "/admin", null),
+        .site => loadIn(t, siteOf(pt)),
+        .app => |k| if (k < pt.apps.len) loadIn(t, pt.apps[k].address),
+    }
+    showTab(i);
+}
+
+fn siteOf(pt: *const ProjectTab) []const u8 {
+    if (pt.live.len > 0) return pt.live;
+    const s = sites.find(pt.folder) orelse return "";
+    if (!s.running) sites.start(pt.folder);
+    return s.address;
+}
+
+fn loadIn(t: Tab, address: []const u8) void {
+    if (address.len == 0) return;
+    t.web.loadUrl(frame_arena.allocator().dupeZ(u8, address) catch return);
+}
+
+/// The project's admin in its tab at `path`: Cloud's signed in through a one-time sign-on
+/// the first time (then `direct`, or the admin's own address); a local one through `p`.
+fn adminAt(i: usize, path: []const u8, direct: ?[]const u8) void {
+    const t = tabs.items[i];
+    const pt = t.project orelse return;
+    pt.page = .admin;
+    showTab(i);
+    if (pt.live.len == 0) {
+        const job = gpa.create(SignIn) catch return;
+        job.* = .{
+            .name = t.name,
+            .web = t.web,
+            .path = path,
+        };
+        const thread = std.Thread.spawn(.{}, SignIn.run, .{job}) catch return;
+        return thread.detach();
+    }
+    const admin = t.url orelse return;
+    // Signed out of Cloud: the admin's own sign-in.
+    if (cloud.token == null) return loadIn(t, admin);
+    if (pt.signed) {
+        const at = std.mem.indexOf(u8, admin, "/admin") orelse admin.len;
+        const url = direct orelse std.fmt.allocPrint(frame_arena.allocator(), "{s}{s}", .{ admin[0..at], path }) catch return;
+        return loadIn(t, url);
+    }
+    pt.signed = true;
+    if (!std.mem.eql(u8, path, "/admin")) sign_on_return = gpa.dupe(u8, path) catch null;
+    cloud.signOnTo(syncing.slugOf(pt.live), signedOn);
+}
+
+fn spaceOf(live: []const u8) []const u8 {
+    if (live.len == 0) return "";
+    for (cloud.spaces) |sp| for (sp.projects) |p| {
+        if (std.mem.eql(u8, hostOf(p.address), hostOf(live))) return sp.name;
     };
-    sign_on_return = gpa.dupe(u8, path) catch null;
-    openProjectAdmin(name, address);
+    return "";
 }
 
 fn pathOf(url: []const u8) []const u8 {
@@ -978,11 +1254,10 @@ fn setView(v: home.View) void {
 }
 
 /// A folder on Home opened: a linked one is its Cloud project, opened in Cloud's admin
-/// (this Mac keeps the folder in step); any other its own admin.
+/// (this Mac keeps the folder in sync); any other its own admin.
 fn openLocal(name: []const u8) void {
     const s = sites.find(name) orelse return;
-    if (s.live.len > 0) return openProjectAdmin(name, s.live);
-    openSite(name);
+    openProjectTab(name, name, s.live, spaceOf(s.live));
 }
 
 fn act(name: []const u8, tag: u32) void {
@@ -996,23 +1271,20 @@ fn act(name: []const u8, tag: u32) void {
             var buf: [256]u8 = undefined;
             native.openInBrowser(std.fmt.bufPrintZ(&buf, "{s}", .{s.address}) catch return);
         },
-        Action.finder => {
-            var buf: [512]u8 = undefined;
-            native.openInBrowser(std.fmt.bufPrintZ(&buf, "file://{s}/publr-sites/{s}", .{ sites.env.get("HOME") orelse "", name }) catch return);
-        },
+        Action.finder => showInFinder(name),
         Action.deploy => return deploy(name),
         Action.view_live_local => {
             var buf: [512]u8 = undefined;
             native.openInBrowser(std.fmt.bufPrintZ(&buf, "{s}", .{s.live}) catch return);
         },
-        Action.stop => sites.command(&.{ "stop", name }),
-        Action.start => sites.command(&.{ "start", name }),
+        Action.stop => sites.stop(name),
+        Action.start => sites.start(name),
         Action.trash => {
-            for (tabs.items, 0..) |t, i| if (t.url == null and std.mem.eql(u8, t.name, name)) {
+            for (tabs.items, 0..) |t, i| if (t.url == null and t.project == null and std.mem.eql(u8, t.name, name)) {
                 closeTab(i);
                 break;
             };
-            sites.command(&.{ "rm", name, "--yes" });
+            sites.remove(name);
         },
         else => {},
     }
@@ -1055,10 +1327,14 @@ fn draw() void {
     const h: u32 = @intFromFloat(@round(size.h * scale));
     if (w == 0 or h == 0) return;
     const t0 = std.Io.Timestamp.now(io, .awake);
+    // Home clears the frame's memory as it lists its cards; a tab's page clears it here.
+    if (active != null) _ = frame_arena.reset(.retain_capacity);
     u.begin();
     var titles: [64][]const u8 = undefined;
     if (active == null) home.draw(u, homeState(), theme) catch |e| return std.debug.print("studio: home: {}\n", .{e});
+    if (active) |i| if (tabs.items[i].project != null) project.draw(u, projectPage(i), theme) catch |e| return std.debug.print("studio: project: {}\n", .{e});
     bar.draw(u, barState(&titles), theme) catch |e| return std.debug.print("studio: bar: {}\n", .{e});
+    if (active == null and view == .settings) settings.draw(u, settingsState(), theme) catch |e| return std.debug.print("studio: settings: {}\n", .{e});
     if (open_sheet != null) {
         var fields: [1]sheet.Field = undefined;
         sheet.draw(u, sheetState(&fields), theme, 0, window) catch |e| return std.debug.print("studio: sheet: {}\n", .{e});
@@ -1135,13 +1411,15 @@ fn closeSheet() void {
     redrawAll();
 }
 
-/// Why `name` cannot be a site's name (p's rule: a folder name with no surprises), or null.
+/// Why `name` cannot be a site's name (the command's rule, `valid_name`: a folder name and a
+/// hostname label), or null. The reasons say which part of the rule it breaks.
 fn nameProblem(name: []const u8) ?[]const u8 {
     if (name.len == 0) return "";
     if (name.len > 40) return "At most 40 characters.";
     if (!std.ascii.isLower(name[0])) return "Start with a lowercase letter.";
     for (name) |ch| if (!std.ascii.isLower(ch) and !std.ascii.isDigit(ch) and ch != '-') return "Lowercase letters, numbers and dashes only.";
     if (name[name.len - 1] == '-' or std.mem.indexOf(u8, name, "--") != null) return "No dash at the end, and no two in a row.";
+    if (!core.sites.valid_name(name)) return "Lowercase letters, numbers and dashes only.";
     if (sites.find(name) != null) return "A site with this name is on this Mac already.";
     return null;
 }
@@ -1367,17 +1645,6 @@ fn deployState(fields: *[1]sheet.Field) sheet.State {
     };
 }
 
-/// The Publr that packs sites: `$STUDIO_PUBLR`, the one inside Studio's app (shipped with
-/// it), or the one `p` runs the sites with.
-fn publrPath(a: std.mem.Allocator) []const u8 {
-    if (env_map.get("STUDIO_PUBLR")) |p| return p;
-    if (std.process.executableDirPathAlloc(io, a)) |dir| {
-        const beside = std.fs.path.join(a, &.{ dir, "publr" }) catch "";
-        if (Io.Dir.cwd().access(io, beside, .{})) |_| return beside else |_| {}
-    } else |_| {}
-    return std.fs.path.join(a, &.{ home_dir, "publr-sites/.bin/bin/publr" }) catch "publr";
-}
-
 fn startDeploy() void {
     if (sheet_busy != null or deploy_job != null or availability != .available) return;
     const token = cloud.token orelse return;
@@ -1394,21 +1661,19 @@ fn startDeploy() void {
         .space = "",
         .name = "",
         .slug = "",
-        .bundle_path = "",
         .progress = &deploy_progress,
         .arena = .init(gpa),
         .done = deployFinished,
     };
     const a = job.arena.allocator();
-    const deploys = std.fs.path.join(a, &.{ support_dir, "deploys" }) catch return;
-    Io.Dir.cwd().createDirPath(io, deploys) catch {};
-    job.publr = publrPath(a);
-    job.site_dir = std.fs.path.join(a, &.{ home_dir, "publr-sites", deploy_site }) catch return;
+    // `publr deploy` in the site's folder: the command Studio carries.
+    job.publr = sites.command_path;
+    job.site_dir = a.dupe(u8, sites.folderOf(deploy_site)) catch return;
+    if (job.site_dir.len == 0) return;
     job.token = a.dupe(u8, token) catch return;
     job.space = a.dupe(u8, cloud.spaces[0].slug) catch return;
     job.name = a.dupe(u8, deploy_site) catch return;
     job.slug = a.dupe(u8, address_field.value()) catch return;
-    job.bundle_path = std.fmt.allocPrint(a, "{s}/{s}.site.tar.gz", .{ deploys, deploy_site }) catch return;
     deploy_progress = .{};
     deploy_job = job;
     sheet_error = null;
@@ -1575,7 +1840,7 @@ const NewSite = struct {
         closeSheet();
         sites.refresh();
         view = .local;
-        openSite(self.name);
+        openLocal(self.name);
         if (sites.find(self.name)) |s| thumbs.take(s.name, s.address);
     }
 };
@@ -1594,16 +1859,128 @@ fn showHome() void {
 fn showTab(i: usize) void {
     if (i >= tabs.items.len) return;
     menu = null;
-    for (tabs.items, 0..) |t, k| t.web.setVisible(k == i);
+    for (tabs.items, 0..) |t, k| t.web.setVisible(k == i and webShown(t));
     active = i;
-    window.setBarHeight(bar.height);
+    const t = tabs.items[i];
+    // A project's Overview is drawn here, over the whole window; its other pages sit under
+    // the strip.
+    if (t.project) |pt| {
+        // A project's Overview and sidebar are drawn here; its other pages lie beside them.
+        if (pt.page == .overview) window.setBarHeight(window.size().h + 10_000) else window.setWebArea(project.sidebar_width, bar.height);
+    } else window.setBarHeight(bar.height);
+    redrawAll();
+}
+
+fn webShown(t: Tab) bool {
+    const pt = t.project orelse return true;
+    return pt.page != .overview;
+}
+
+/// The project tab `i` as its page draws it.
+fn projectPage(i: usize) project.State {
+    const t = tabs.items[i];
+    const pt = t.project.?;
+    const size = window.size();
+    const local = if (pt.folder.len > 0) sites.find(pt.folder) else null;
+    const kind: home.Kind = if (local != null and pt.live.len > 0) .both else if (local != null) .local else .cloud;
+    var state: syncing.State = .checking;
+    if (kind == .both) {
+        var db: [512]u8 = undefined;
+        syncing.check(pt.folder, siteDir(&db, pt.folder), pt.live, nowMs(), false);
+        state = syncing.stateOf(pt.folder) orelse .checking;
+    }
+    const a = frame_arena.allocator();
+    var none: [0]?[]const u8 = .{};
+    const app_thumbs: []?[]const u8 = a.alloc(?[]const u8, pt.apps.len) catch &none;
+    for (pt.apps, app_thumbs) |app, *thumb| {
+        var kb: [256]u8 = undefined;
+        var nb: [256]u8 = undefined;
+        const key = thumbs.key(&kb, appThumbName(&nb, pt.folder, app.name));
+        thumb.* = if (key) |k| a.dupe(u8, k) catch null else null;
+    }
+    const waiting = kind == .both and state == .waiting and syncing.reviewOf(pt.folder) != null;
+    return .{
+        .top = bar.height,
+        .width = @floatCast(size.w),
+        .height = @floatCast(size.h),
+        .name = t.name,
+        .kind = kind,
+        .status = if (pt.note.len > 0) pt.note else switch (kind) {
+            .both => state.text(),
+            .local => if (local.?.running) "Running on this Mac" else "Stopped",
+            .cloud => "Live on Cloud",
+        },
+        .running = if (kind == .local) local.?.running else state != .failed,
+        .changed = kind == .both and (state == .unsent or state == .waiting),
+        .callout = if (kind != .both) .none else switch (state) {
+            .unsent => .unsent,
+            .waiting => if (waiting) .waiting else .none,
+            .failed => .failed,
+            else => .none,
+        },
+        .address = if (pt.live.len > 0) pt.live else if (local) |s| s.address else "",
+        .folder = if (local) |s| shortFolder(a, s.folder) else "",
+        .pin = if (local) |s| s.pin else "",
+        .own_build = if (local) |s| shortBuild(a, s.own_build) else "",
+        .shared_build = if (local) |s| shortBuild(a, s.shared_build) else "",
+        .advanced = pt.advanced,
+        .cloning = pt.cloning,
+        .apps_loading = pt.apps_loading,
+        .app_thumbs = app_thumbs,
+        .space = if (pt.space.len > 0) pt.space else spaceOf(pt.live),
+        .apps = pt.apps,
+        .menu_open = pt.menu_open,
+        .scroll = pt.scroll,
+        .page = pt.page,
+        .hover = switch (hover) {
+            .project => |h| h,
+            else => .none,
+        },
+    };
+}
+
+fn clickProject(i: usize, target: project.Target) void {
+    const t = tabs.items[i];
+    const pt = t.project orelse return;
+    const was_open = pt.menu_open;
+    pt.menu_open = false;
+    switch (target) {
+        .none, .outside => {},
+        .more => pt.menu_open = !was_open,
+        .clone => startClone(pt),
+        .side => |pg| goTo(i, pg),
+        .finder => showInFinder(pt.folder),
+        .advanced => pt.advanced = !pt.advanced,
+        .choose_build => choosePublr(pt.folder, false),
+        .use_pin => choosePublr(pt.folder, true),
+        .admin => goTo(i, .admin),
+        .site, .address => goTo(i, .site),
+        .app => |k| goTo(i, .{ .app = k }),
+        .callout => if (syncing.reviewOf(pt.folder) != null) openReview(pt.folder, pt.live) else syncing.send(pt.folder),
+        .rare => |r| switch (r) {
+            .clone => startClone(pt),
+            .local_copy => openSite(pt.folder),
+            .finder => showInFinder(pt.folder),
+            .deploy => deploy(pt.folder),
+            .dashboard => {
+                var buf: [512]u8 = undefined;
+                native.openInBrowser(std.fmt.bufPrintZ(&buf, "{s}/projects/{s}", .{ cloud.base, syncing.slugOf(pt.live) }) catch return);
+            },
+            .remove => {
+                const folder = gpa.dupe(u8, pt.folder) catch return;
+                defer gpa.free(folder);
+                closeTab(i);
+                act(folder, Action.trash);
+            },
+        },
+    }
     redrawAll();
 }
 
 fn openSite(name: []const u8) void {
     rememberRecent(name);
     // A folder linked to Cloud has two tabs of the same name: this one is the local admin's.
-    for (tabs.items, 0..) |t, i| if (t.url == null and std.mem.eql(u8, t.name, name)) return showTab(i);
+    for (tabs.items, 0..) |t, i| if (t.url == null and t.project == null and std.mem.eql(u8, t.name, name)) return showTab(i);
     const web = window.addWebView() catch return;
     web.loadHtml(starting_page);
     const owned = gpa.dupe(u8, name) catch return;
@@ -1629,6 +2006,10 @@ fn closeTab(i: usize) void {
     t.web.destroy();
     gpa.free(t.name);
     if (t.url) |url| gpa.free(url);
+    if (t.project) |pt| {
+        pt.arena.deinit();
+        gpa.destroy(pt);
+    }
     saveOpenSites();
     // `active` still counts the removed tab: put it right before showing anything.
     const was = active;
@@ -1647,13 +2028,229 @@ const starting_page =
     \\<p>Starting the site…</p>
 ;
 
+// A project elsewhere: its apps listed, or the project cloned here, off the main thread.
+// Without a device token for it, a Cloud project is signed in first (Cloud's sign-on token
+// redeemed by `publr login --sign-on`), as sync does.
+
+const RemoteKind = enum { apps, clone };
+
+const RemoteJob = struct {
+    kind: RemoteKind,
+    live: []const u8,
+    /// Cloud's one-time sign-on token, when the job signs in first; empty when it need not.
+    sign_on: []const u8,
+    arena: std.heap.ArenaAllocator,
+    apps: []const project.App = &.{},
+    /// No device token for the project, and none asked for yet.
+    needs_sign_in: bool = false,
+    ok: bool = false,
+    /// What a failed clone said last.
+    line: []const u8 = "",
+
+    fn run(self: *RemoteJob) void {
+        const a = self.arena.allocator();
+        if (self.sign_on.len > 0) {
+            _ = std.process.run(a, io, .{
+                .argv = &.{ sites.command_path, "login", self.live, "--sign-on", self.sign_on },
+            }) catch {};
+        }
+        const token = remote.tokenFor(io, a, env_map, self.live);
+        if (token == null and self.sign_on.len == 0 and cloud.token != null) {
+            self.needs_sign_in = true;
+            return native.runOnMain(self, finished);
+        }
+        switch (self.kind) {
+            .apps => if (token) |t| {
+                self.apps = remote.apps(io, a, self.live, t);
+            },
+            .clone => self.clone(a),
+        }
+        native.runOnMain(self, finished);
+    }
+
+    /// `publr clone`, its progress page opened in the tab the moment the command prints it;
+    /// the page asks what comes down.
+    fn clone(self: *RemoteJob, a: std.mem.Allocator) void {
+        var child = std.process.spawn(io, .{
+            .argv = &.{ sites.command_path, "clone", self.live, "--no-open" },
+            .stdout = .pipe,
+            .stderr = .pipe,
+        }) catch |e| {
+            self.line = @errorName(e);
+            return;
+        };
+        var buffer: [4096]u8 = undefined;
+        var reader = child.stdout.?.readerStreaming(io, &buffer);
+        var last: []const u8 = "";
+        while (reader.interface.takeDelimiter('\n') catch null) |line| {
+            last = a.dupe(u8, line) catch last;
+            const marker = "Follow it at ";
+            const at = std.mem.indexOf(u8, line, marker) orelse continue;
+            const url = std.mem.trim(u8, line[at + marker.len ..], " \r");
+            const opened = gpa.create(PageOpened) catch continue;
+            opened.* = .{
+                .live = gpa.dupe(u8, self.live) catch continue,
+                .url = gpa.dupeZ(u8, url) catch continue,
+            };
+            native.runOnMain(opened, PageOpened.load);
+        }
+        var errors: [4096]u8 = undefined;
+        var err_reader = child.stderr.?.readerStreaming(io, &errors);
+        const said = err_reader.interface.allocRemaining(a, .limited(1 << 16)) catch "";
+        const term = child.wait(io) catch {
+            self.line = "Clone failed";
+            return;
+        };
+        self.ok = term == .exited and term.exited == 0;
+        if (!self.ok) {
+            const told = remote.lastLine(said);
+            self.line = if (told.len > 0) told else last;
+        }
+    }
+
+    fn finished(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *RemoteJob = @ptrCast(@alignCast(ctx));
+        defer {
+            self.arena.deinit();
+            gpa.free(self.live);
+            gpa.free(self.sign_on);
+            gpa.destroy(self);
+        }
+        if (self.needs_sign_in) {
+            const live = gpa.dupe(u8, self.live) catch return;
+            remote_pending.append(gpa, .{
+                .kind = self.kind,
+                .live = live,
+            }) catch return gpa.free(live);
+            cloud.signOnTo(syncing.slugOf(live), remoteSignedOn);
+            return;
+        }
+        const pt = remoteTab(self.live) orelse return;
+        switch (self.kind) {
+            .apps => {
+                const a = pt.arena.allocator();
+                const copy = a.alloc(project.App, self.apps.len) catch return;
+                for (self.apps, copy) |app, *to| to.* = .{
+                    .name = a.dupe(u8, app.name) catch "",
+                    .label = a.dupe(u8, app.label) catch "",
+                    .address = a.dupe(u8, app.address) catch "",
+                    .mount = a.dupe(u8, app.mount) catch "/",
+                };
+                if (pt.folder.len == 0) pt.apps = copy;
+                pt.apps_loading = false;
+            },
+            .clone => {
+                pt.cloning = false;
+                if (!self.ok) {
+                    pt.note = pt.arena.allocator().dupe(u8, if (self.line.len > 0) self.line else "Clone failed") catch "";
+                } else {
+                    pt.note = "";
+                    sites.refresh();
+                    becameLocal(pt);
+                }
+            },
+        }
+        redrawAll();
+    }
+};
+
+/// A clone's progress page, opened in its project's tab as the admin is.
+const PageOpened = struct {
+    live: []u8,
+    url: [:0]u8,
+
+    fn load(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *PageOpened = @ptrCast(@alignCast(ctx));
+        defer {
+            gpa.free(self.live);
+            gpa.free(self.url);
+            gpa.destroy(self);
+        }
+        for (tabs.items, 0..) |t, i| {
+            const pt = t.project orelse continue;
+            if (pt.live.len == 0 or !std.mem.eql(u8, hostOf(pt.live), hostOf(self.live))) continue;
+            pt.page = .admin;
+            showTab(i);
+            return loadIn(t, self.url);
+        }
+    }
+};
+
+var remote_pending: std.ArrayList(struct { kind: RemoteKind, live: []const u8 }) = .empty;
+
+fn startRemote(kind: RemoteKind, live: []const u8, sign_on: []const u8) void {
+    const job = gpa.create(RemoteJob) catch return;
+    job.* = .{
+        .kind = kind,
+        .live = gpa.dupe(u8, live) catch return gpa.destroy(job),
+        .sign_on = gpa.dupe(u8, sign_on) catch return gpa.destroy(job),
+        .arena = .init(gpa),
+    };
+    const thread = std.Thread.spawn(.{}, RemoteJob.run, .{job}) catch return;
+    thread.detach();
+}
+
+/// Cloud's sign-on token for a project a job waited on: the job again, signing in first.
+fn remoteSignedOn(signed: @import("cloud.zig").SignedOn) void {
+    var k: usize = 0;
+    while (k < remote_pending.items.len) {
+        const waiting = remote_pending.items[k];
+        if (!std.mem.eql(u8, syncing.slugOf(waiting.live), signed.slug)) {
+            k += 1;
+            continue;
+        }
+        _ = remote_pending.orderedRemove(k);
+        defer gpa.free(waiting.live);
+        if (signed.problem == null and signed.token.len > 0) {
+            startRemote(waiting.kind, waiting.live, signed.token);
+        } else if (remoteTab(waiting.live)) |pt| {
+            pt.cloning = false;
+            pt.apps_loading = false;
+            if (waiting.kind == .clone) pt.note = "Sign-in failed";
+        }
+    }
+    redrawAll();
+}
+
+/// The open tab of the project live at `live`, if any.
+fn remoteTab(live: []const u8) ?*ProjectTab {
+    for (tabs.items) |t| {
+        const pt = t.project orelse continue;
+        if (pt.live.len > 0 and std.mem.eql(u8, hostOf(pt.live), hostOf(live))) return pt;
+    }
+    return null;
+}
+
+fn startClone(pt: *ProjectTab) void {
+    if (pt.cloning or pt.live.len == 0 or pt.folder.len > 0) return;
+    pt.cloning = true;
+    pt.note = "";
+    startRemote(.clone, pt.live, "");
+}
+
+/// A cloned project's tab, now its copy on this Mac: the folder and its own apps.
+fn becameLocal(pt: *ProjectTab) void {
+    for (sites.list.items) |s| {
+        if (s.live.len == 0 or !std.mem.eql(u8, hostOf(s.live), hostOf(pt.live))) continue;
+        const a = pt.arena.allocator();
+        // Tabs know a local project by its name, as the site list does.
+        pt.folder = a.dupe(u8, s.name) catch return;
+        var db: [512]u8 = undefined;
+        pt.apps = project.readApps(io, a, siteDir(&db, pt.folder), pt.live);
+        takeAppThumbs(pt.folder, pt.apps);
+        return;
+    }
+}
+
 const SignIn = struct {
     name: []const u8,
     web: *native.WebView,
+    /// The admin's page it opens on.
+    path: []const u8 = "/admin",
     link: ?[:0]u8 = null,
 
     fn run(self: *SignIn) void {
-        self.link = sites.signInLink(self.name, "/admin") catch |e| blk: {
+        self.link = sites.signInLink(self.name, self.path) catch |e| blk: {
             std.debug.print("studio: signing in to {s} failed: {}\n", .{ self.name, e });
             break :blk null;
         };
@@ -1680,6 +2277,7 @@ fn onMenu(_: ?*anyopaque, tag: u32) void {
             sites.refresh();
             redrawAll();
         },
+        Tag.settings => openSettings(),
         else => if (tag >= Tag.tab and tag < Tag.tab + 9) showTab(tag - Tag.tab),
     }
 }
@@ -1718,7 +2316,7 @@ fn saveOpenSites() void {
     defer out.deinit(gpa);
     // Only local sites' tabs come back as they were; a Cloud tab needs a fresh sign-on.
     for (tabs.items) |t| {
-        if (t.url != null) continue;
+        if (t.url != null or t.project != null) continue;
         out.appendSlice(gpa, t.name) catch return;
         out.append(gpa, '\n') catch return;
     }
@@ -1758,6 +2356,348 @@ fn rememberRecent(name: []const u8) void {
 }
 
 test {
+    _ = deploying;
     _ = bar;
     _ = home;
+    _ = project;
+    _ = sites_module;
+    _ = settings;
+}
+
+// Settings: where sites live, the command in Terminal, and the build every project runs.
+// Read from the command's config each time the page opens, written back at once on every
+// change.
+
+/// What the Settings page shows: copies in their own arena, made again on every change.
+var settings_arena: std.heap.ArenaAllocator = undefined;
+var settings_ready = false;
+var settings_folder: []const u8 = "";
+/// The other folders, absolute (what `remove` is given) and as people read them.
+var settings_folders: []const []const u8 = &.{};
+var settings_shown: []const []const u8 = &.{};
+/// The Publr every site runs, as people read it; null when each runs its own release.
+var settings_publr: ?[]const u8 = null;
+var settings_command: settings.Command = .missing;
+/// Advanced is unfolded (for this run only).
+var settings_advanced = false;
+var settings_busy: ?[]const u8 = null;
+var settings_problem: ?[]const u8 = null;
+
+/// Where Terminal's `publr` goes: the place editors put their commands.
+const command_link = "/usr/local/bin/publr";
+
+/// Home on its Settings page, read from the config afresh.
+fn openSettings() void {
+    menu = null;
+    if (active != null) showHome();
+    view = .settings;
+    scroll = 0;
+    loadSettings();
+    settings_problem = null;
+    hover = .none;
+    redrawAll();
+}
+
+fn loadSettings() void {
+    if (!settings_ready) {
+        settings_arena = .init(gpa);
+        settings_ready = true;
+    }
+    _ = settings_arena.reset(.retain_capacity);
+    const a = settings_arena.allocator();
+    const config = core.Config.load(io, a, env_map) catch |e| {
+        settings_problem = "The settings could not be read.";
+        return std.debug.print("studio: settings: {t}\n", .{e});
+    };
+    settings_folder = shortFolder(a, config.folder);
+    settings_folders = config.folders;
+    const shown = a.alloc([]const u8, config.folders.len) catch return;
+    for (config.folders, shown) |f, *out| out.* = shortFolder(a, f);
+    settings_shown = shown;
+    settings_publr = if (config.publr.len > 0) shortFolder(a, config.publr) else null;
+    settings_command = commandState(a);
+}
+
+/// Whether Terminal's `publr` is Studio's, another, or none.
+fn commandState(a: std.mem.Allocator) settings.Command {
+    var buf: [1024]u8 = undefined;
+    if (Io.Dir.cwd().readLink(io, command_link, &buf)) |n| {
+        if (std.mem.eql(u8, buf[0..n], sites.command_path)) return .installed;
+    } else |_| {}
+    const found = sites_module.onPath(a, io, env_map) orelse {
+        Io.Dir.cwd().access(io, command_link, .{}) catch return .missing;
+        return .{ .other = command_link };
+    };
+    if (std.mem.eql(u8, found, sites.command_path)) return .installed;
+    return .{ .other = found };
+}
+
+fn settingsState() settings.State {
+    const size = window.size();
+    return .{
+        .top = bar.height,
+        .left = home.sidebar_width,
+        .width = @floatCast(size.w),
+        .height = @floatCast(size.h),
+        .folder = settings_folder,
+        .folders = settings_shown,
+        .publr = settings_publr,
+        .command = settings_command,
+        .advanced = settings_advanced,
+        .busy = settings_busy,
+        .problem = settings_problem,
+        .hover = switch (hover) {
+            .settings => |h| h,
+            else => .none,
+        },
+    };
+}
+
+fn clickSettings(t: settings.Target) void {
+    switch (t) {
+        .change_folder => chooseFolder(.default),
+        .add_folder => chooseFolder(.add),
+        .remove_folder => |i| removeFolder(i),
+        .install => installCommand(),
+        .advanced => settings_advanced = !settings_advanced,
+        .choose_publr => choosePublr(null, false),
+        .clear_publr => choosePublr(null, true),
+        .none => {},
+    }
+    hover = .none;
+    redrawAll();
+}
+
+/// The config read, changed by `change` and written, then the sheet and Home again.
+fn changeConfig(change: *const fn (*core.Config) anyerror!void) void {
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+    var config = core.Config.load(io, arena.allocator(), env_map) catch {
+        settings_problem = "The settings could not be read.";
+        return redrawAll();
+    };
+    change(&config) catch |e| {
+        settings_problem = switch (e) {
+            error.TooManyFolders => "That is as many folders as Studio lists.",
+            else => "The settings could not be saved.",
+        };
+        return redrawAll();
+    };
+    config.save() catch {
+        settings_problem = "The settings could not be saved.";
+        return redrawAll();
+    };
+    settings_problem = null;
+    loadSettings();
+    sites.refresh();
+    redrawAll();
+}
+
+const FolderFor = enum {
+    default,
+    add,
+};
+
+/// The system's folder chooser, off the main thread: AppleScript's `choose folder`, the
+/// same panel apps open.
+const ChooseFolder = struct {
+    purpose: FolderFor,
+    chosen: []u8 = &.{},
+
+    fn run(job: *ChooseFolder) void {
+        const prompt = if (job.purpose == .default) "Where new sites go" else "A folder of sites, or a site's folder";
+        const script = std.fmt.allocPrint(gpa, "POSIX path of (choose folder with prompt \"{s}\")", .{prompt}) catch return native.runOnMain(job, finish);
+        defer gpa.free(script);
+        const result = std.process.run(gpa, io, .{
+            .argv = &.{ "osascript", "-e", script },
+        }) catch return native.runOnMain(job, finish);
+        defer gpa.free(result.stderr);
+        const ok = result.term == .exited and result.term.exited == 0;
+        if (ok) {
+            const path = std.mem.trimEnd(u8, std.mem.trim(u8, result.stdout, " \r\n"), "/");
+            job.chosen = gpa.dupe(u8, path) catch &.{};
+        }
+        gpa.free(result.stdout);
+        native.runOnMain(job, finish);
+    }
+
+    fn finish(ctx: ?*anyopaque) callconv(.c) void {
+        const job: *ChooseFolder = @ptrCast(@alignCast(ctx));
+        defer {
+            gpa.free(job.chosen);
+            gpa.destroy(job);
+        }
+        settings_busy = null;
+        if (job.chosen.len == 0) return redrawAll();
+        chosen_folder = job.chosen;
+        changeConfig(switch (job.purpose) {
+            .default => setDefaultFolder,
+            .add => addFolder,
+        });
+        chosen_folder = "";
+    }
+};
+
+/// The folder just chosen, for `changeConfig`'s change.
+var chosen_folder: []const u8 = "";
+
+fn setDefaultFolder(config: *core.Config) anyerror!void {
+    config.folder = chosen_folder;
+    try Io.Dir.cwd().createDirPath(io, chosen_folder);
+}
+
+fn addFolder(config: *core.Config) anyerror!void {
+    _ = try config.add(chosen_folder);
+}
+
+fn chooseFolder(purpose: FolderFor) void {
+    if (settings_busy != null) return;
+    const job = gpa.create(ChooseFolder) catch return;
+    job.* = .{
+        .purpose = purpose,
+    };
+    settings_busy = "Choosing a folder…";
+    redrawAll();
+    const thread = std.Thread.spawn(.{}, ChooseFolder.run, .{job}) catch {
+        settings_busy = null;
+        gpa.destroy(job);
+        return;
+    };
+    thread.detach();
+}
+
+var removing: usize = 0;
+
+fn removeFolder(i: usize) void {
+    if (i >= settings_folders.len) return;
+    removing = i;
+    changeConfig(removeChosen);
+}
+
+fn removeChosen(config: *core.Config) anyerror!void {
+    _ = try config.remove(settings_folders[removing]);
+}
+
+/// The Publr a project (or, with no name, every site) runs: a binary chosen in the system's
+/// file panel, or (`clear`) its own release again. Off the main thread: the panel waits for
+/// the person, and a running site restarts on the new Publr.
+const ChoosePublr = struct {
+    /// The project's site; null for every site.
+    name: ?[]u8,
+    clear: bool,
+    failed: bool = false,
+
+    fn run(job: *ChoosePublr) void {
+        defer native.runOnMain(job, finish);
+        var path: []u8 = &.{};
+        defer gpa.free(path);
+        if (!job.clear) {
+            const result = std.process.run(gpa, io, .{
+                .argv = &.{ "osascript", "-e", "POSIX path of (choose file with prompt \"Choose a publr binary\")" },
+            }) catch return;
+            defer gpa.free(result.stderr);
+            defer gpa.free(result.stdout);
+            // Cancelled: nothing changes.
+            if (result.term != .exited or result.term.exited != 0) return;
+            path = gpa.dupe(u8, std.mem.trim(u8, result.stdout, " \r\n")) catch return;
+            if (path.len == 0) return;
+        }
+        sites.choosePublr(job.name, path) catch |e| {
+            job.failed = true;
+            std.debug.print("studio: choosing the Publr: {t}\n", .{e});
+        };
+    }
+
+    fn finish(ctx: ?*anyopaque) callconv(.c) void {
+        const job: *ChoosePublr = @ptrCast(@alignCast(ctx));
+        defer {
+            if (job.name) |n| gpa.free(n);
+            gpa.destroy(job);
+        }
+        if (job.name == null) {
+            settings_busy = null;
+            settings_problem = if (job.failed) "That Publr could not be used." else null;
+            loadSettings();
+        }
+        sites.refresh();
+        redrawAll();
+    }
+};
+
+fn choosePublr(name: ?[]const u8, clear: bool) void {
+    if (name == null and settings_busy != null) return;
+    const job = gpa.create(ChoosePublr) catch return;
+    job.* = .{
+        .name = if (name) |n| gpa.dupe(u8, n) catch return gpa.destroy(job) else null,
+        .clear = clear,
+    };
+    if (name == null) {
+        settings_busy = if (clear) "Going back to each site's release…" else "Choosing a Publr…";
+        redrawAll();
+    }
+    const thread = std.Thread.spawn(.{}, ChoosePublr.run, .{job}) catch {
+        if (name == null) settings_busy = null;
+        if (job.name) |n| gpa.free(n);
+        gpa.destroy(job);
+        return;
+    };
+    thread.detach();
+}
+
+/// `/usr/local/bin/publr` made a link to the command inside Studio: directly when the folder
+/// lets this user write, else through the system's administrator prompt.
+const Install = struct {
+    ok: bool = false,
+
+    fn run(job: *Install) void {
+        job.ok = link() or linkAsAdmin();
+        native.runOnMain(job, finish);
+    }
+
+    fn link() bool {
+        const cwd = Io.Dir.cwd();
+        cwd.createDirPath(io, "/usr/local/bin") catch return false;
+        cwd.deleteFile(io, command_link) catch |e| if (e != error.FileNotFound) return false;
+        cwd.symLink(io, sites.command_path, command_link, .{}) catch return false;
+        return true;
+    }
+
+    fn linkAsAdmin() bool {
+        const script = std.fmt.allocPrint(gpa, "do shell script \"mkdir -p /usr/local/bin && ln -sf '{s}' {s}\" with administrator privileges", .{ sites.command_path, command_link }) catch return false;
+        defer gpa.free(script);
+        const result = std.process.run(gpa, io, .{
+            .argv = &.{ "osascript", "-e", script },
+        }) catch return false;
+        gpa.free(result.stdout);
+        gpa.free(result.stderr);
+        return result.term == .exited and result.term.exited == 0;
+    }
+
+    fn finish(ctx: ?*anyopaque) callconv(.c) void {
+        const job: *Install = @ptrCast(@alignCast(ctx));
+        defer gpa.destroy(job);
+        settings_busy = null;
+        settings_problem = if (job.ok) null else "publr was not installed.";
+        loadSettings();
+        redrawAll();
+    }
+};
+
+fn installCommand() void {
+    if (settings_busy != null or settings_command != .missing) return;
+    // `STUDIO_NO_INSTALL`: the button is pressed without touching /usr/local/bin (tests).
+    if (env_map.get("STUDIO_NO_INSTALL") != null) {
+        std.debug.print("studio: would link {s} to {s}\n", .{ command_link, sites.command_path });
+        return;
+    }
+    const job = gpa.create(Install) catch return;
+    job.* = .{};
+    settings_busy = "Installing publr…";
+    redrawAll();
+    const thread = std.Thread.spawn(.{}, Install.run, .{job}) catch {
+        settings_busy = null;
+        gpa.destroy(job);
+        return;
+    };
+    thread.detach();
 }

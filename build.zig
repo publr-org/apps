@@ -8,6 +8,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // The `publr` command's core (sites, servers, releases, sign-on), and the command itself,
+    // which Studio carries beside its executable: the helper and sync run it.
+    const cli = b.dependency("publr_cli", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const exe = b.addExecutable(.{
         .name = "publr-studio-app",
         .root_module = b.createModule(.{
@@ -36,13 +42,27 @@ pub fn build(b: *std.Build) void {
                     .name = "publr_icons",
                     .module = b.dependency("publr_icons", .{}).module("publr_icons"),
                 },
+                .{
+                    .name = "publr_cli",
+                    .module = cli.module("publr_cli"),
+                },
             },
         }),
     });
     b.installArtifact(exe);
-    _ = native_build.addAppBundle(b, exe, "Publr Studio", "app.publr.studio", .{
+    // Beside Studio in zig-out/bin too, so `zig build run` finds it as the app does.
+    b.installArtifact(cli.artifact("publr"));
+    const app = native_build.addAppBundle(b, exe, "Publr Studio", "app.publr.studio", .{
         .icon = b.path("assets/AppIcon.icns"),
     });
+    const bundled = b.addInstallArtifact(cli.artifact("publr"), .{
+        .dest_dir = .{
+            .override = .{
+                .custom = "Publr Studio.app/Contents/MacOS",
+            },
+        },
+    });
+    app.dependOn(&bundled.step);
 
     const tests = b.addTest(.{
         .root_module = exe.root_module,

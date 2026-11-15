@@ -10,6 +10,9 @@
         .publr_icons = .{
             .path = "../icons",
         },
+        .publr_cli = .{
+            .path = "../cli",
+        },
     },
     .paths = .{
         "build.zig",

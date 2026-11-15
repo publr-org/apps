@@ -1,4 +1,4 @@
-//! Keeping each folder on this Mac in step with its Cloud project, off the main thread. The
+//! Keeping each folder on this Mac in sync with its Cloud project, off the main thread. The
 //! folder's Publr says where it is (`publr pull --check`); one with no work of its own that
 //! Cloud moved past is brought up to date (`publr pull`, its server stopped first: only what
 //! changed comes down). A folder not yet signed in to its project is signed in through
@@ -62,7 +62,7 @@ const Job = struct {
     /// The project's address (`login`), and the sign-on token for it.
     site: []u8,
     token: []u8,
-    /// `p stop <name>` first (`pull`: a server must not run while the folder is replaced).
+    /// `publr stop` first (`pull`: a server must not run while the folder is replaced).
     stop_first: bool,
     exit: u8 = 255,
     out: []u8 = &.{},
@@ -75,7 +75,7 @@ const Job = struct {
         const a = shared.gpa;
         if (job.stop_first) {
             const stopped = try std.process.run(a, shared.io, .{
-                .argv = &.{ shared.p_path, "stop", job.name },
+                .argv = &.{ shared.publr, "stop", job.dir },
                 .environ_map = shared.env,
             });
             a.free(stopped.stdout);
@@ -117,8 +117,8 @@ const Shared = struct {
     gpa: std.mem.Allocator = undefined,
     io: std.Io = undefined,
     env: *const std.process.Environ.Map = undefined,
+    /// The `publr` command Studio carries.
     publr: []const u8 = "",
-    p_path: []const u8 = "",
     /// Asks Cloud for a sign-on token for a project's slug; answers through `signedOn`.
     sign_on: *const fn (slug: []const u8) void = undefined,
     /// Something a card shows changed.
@@ -138,7 +138,6 @@ pub fn init(options: struct {
     io: std.Io,
     env: *const std.process.Environ.Map,
     publr: []const u8,
-    p_path: []const u8,
     sign_on: *const fn (slug: []const u8) void,
     changed: *const fn () void,
     running: *const fn (name: []const u8) bool,
@@ -147,7 +146,6 @@ pub fn init(options: struct {
     shared.io = options.io;
     shared.env = options.env;
     shared.publr = options.publr;
-    shared.p_path = options.p_path;
     shared.sign_on = options.sign_on;
     shared.changed = options.changed;
     shared.running = options.running;

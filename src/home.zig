@@ -52,6 +52,9 @@ pub const Item = struct {
     changed: bool = false,
     /// Its thumbnail's name in the `ui` (null: none yet).
     thumb: ?[]const u8 = null,
+    /// Where it is, as its section's label: the folder holding it ("~/Publr"), "On Cloud".
+    /// Items of one group come together; labels show when there are two groups or more.
+    group: []const u8 = "",
 };
 
 /// The filter on the one list.
@@ -62,6 +65,8 @@ pub const View = union(enum) {
     cloud,
     /// One space's, listed when there are several.
     space: usize,
+    /// Not a filter: the Settings page beside the sidebar (`settings.zig` draws it).
+    settings,
 };
 
 pub const Space = struct {
@@ -106,6 +111,7 @@ pub const Target = union(enum) {
     local,
     cloud,
     space: usize,
+    settings,
     show_grid,
     show_list,
     new_site,
@@ -161,29 +167,100 @@ fn cardWidth(s: State) f32 {
     return (contentRect(s).w - 2 * pad - gap * (n - 1)) / n;
 }
 
+/// Whether the items fall into sections: two groups or more among them.
+fn grouped(s: State) bool {
+    if (s.items.len == 0 or s.items[0].group.len == 0) return false;
+    for (s.items[1..]) |it| if (!std.mem.eql(u8, it.group, s.items[0].group)) return true;
+    return false;
+}
+
+/// Whether item `i` begins a section of its own.
+fn startsSection(s: State, i: usize) bool {
+    return i == 0 or !std.mem.eql(u8, s.items[i].group, s.items[i - 1].group);
+}
+
+/// How tall `n` items stand, without a label.
+fn itemsHeight(s: State, n: usize) f32 {
+    return switch (s.layout) {
+        .grid => blk: {
+            const h = cardWidth(s) * 3 / 4 + meta_height;
+            const rows: f32 = @floatFromInt((n + columns(s) - 1) / columns(s));
+            break :blk rows * (h + gap);
+        },
+        .list => row_height * @as(f32, @floatFromInt(n)),
+    };
+}
+
+/// Where item `i`'s section's items start, under its label, and `i`'s place among them.
+const Place = struct {
+    y: f32,
+    k: usize,
+};
+
+fn placeOf(s: State, i: usize) Place {
+    if (!grouped(s)) return .{
+        .y = 0,
+        .k = i,
+    };
+    var y: f32 = label_height;
+    var start: usize = 0;
+    var j: usize = 1;
+    while (j <= i) : (j += 1) if (startsSection(s, j)) {
+        y += itemsHeight(s, j - start) + label_height;
+        start = j;
+    };
+    return .{
+        .y = y,
+        .k = i - start,
+    };
+}
+
 /// The item's whole place (thumbnail and text, or the row), scrolled.
 pub fn itemRect(s: State, i: usize) ui.Rect {
     const c = contentRect(s);
+    const at = placeOf(s, i);
     switch (s.layout) {
         .grid => {
             const w = cardWidth(s);
             const h = w * 3 / 4 + meta_height;
-            const col: f32 = @floatFromInt(i % columns(s));
-            const row: f32 = @floatFromInt(i / columns(s));
+            const col: f32 = @floatFromInt(at.k % columns(s));
+            const row: f32 = @floatFromInt(at.k / columns(s));
             return .{
                 .x = c.x + pad + col * (w + gap),
-                .y = c.y + pad + row * (h + gap) - s.scroll,
+                .y = c.y + pad + at.y + row * (h + gap) - s.scroll,
                 .w = w,
                 .h = h,
             };
         },
         .list => return .{
             .x = c.x + pad,
-            .y = c.y + row_height * @as(f32, @floatFromInt(i)) - s.scroll,
+            .y = c.y + at.y + row_height * @as(f32, @floatFromInt(at.k)) - s.scroll,
             .w = c.w - 2 * pad,
             .h = row_height,
         },
     }
+}
+
+/// The label over the section item `i` begins: the folder as it is spelled (a path is never
+/// set in capitals), in the sidebar label's grey.
+fn drawSectionLabel(u: *ui.Ui, s: State, t: *const Theme, i: usize) !void {
+    const r = itemRect(s, i);
+    try u.text(.{
+        .x = r.x,
+        .y = r.y - 30,
+        .w = contentRect(s).w - 2 * pad,
+        .h = 18,
+    }, s.items[i].group, .{
+        .size = 12,
+        .weight = 600,
+        .color = t.text2,
+    });
+    if (s.layout == .list) try u.rect(.{
+        .x = r.x,
+        .y = r.y - 1,
+        .w = r.w,
+        .h = 1,
+    }, t.border, 0);
 }
 
 fn thumbRect(s: State, i: usize) ui.Rect {
@@ -249,6 +326,16 @@ pub fn maxScroll(s: State) f32 {
     }, s.items.len - 1);
     const c = contentRect(s);
     return @max(0, last.y + last.h + pad - (c.y + c.h));
+}
+
+/// Settings, the sidebar's last row, just over the account.
+fn settingsRect(s: State) ui.Rect {
+    return .{
+        .x = 8,
+        .y = s.height - account_height - nav_step - 4,
+        .w = sidebar_width - 16,
+        .h = nav_row,
+    };
 }
 
 /// The account at the sidebar's foot: you, or Sign in to Publr Cloud.
@@ -365,6 +452,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     }
     if (x < sidebar_width) {
         if (accountRect(s).contains(x, y)) return if (s.account == .signed_in) .account else .sign_in;
+        if (settingsRect(s).contains(x, y)) return .settings;
         if (navRect(s, 0).contains(x, y)) return .recents;
         if (navRect(s, 1).contains(x, y)) return .all;
         if (navRect(s, 2).contains(x, y)) return .local;
@@ -376,6 +464,8 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
         }
         return .none;
     }
+    // The Settings page answers its own clicks.
+    if (s.view == .settings) return .none;
     if (y < s.top + header_height) {
         if (layoutRect(s, .grid).contains(x, y)) return .show_grid;
         if (layoutRect(s, .list).contains(x, y)) return .show_list;
@@ -400,6 +490,7 @@ pub fn targetRect(s: State, u: *ui.Ui, t: Target) ?ui.Rect {
     return switch (t) {
         .none, .outside_menu, .menu_item => null,
         .account, .sign_in => accountRect(s),
+        .settings => settingsRect(s),
         .recents => navRect(s, 0),
         .all => navRect(s, 1),
         .local => navRect(s, 2),
@@ -437,6 +528,7 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
         .h = s.height - s.top,
     }, t.bg, 0);
     try drawSidebar(u, s, t);
+    if (s.view == .settings) return;
     try drawHeader(u, s, t);
     try drawHead(u, s, t);
     try drawContent(u, s, t);
@@ -526,6 +618,7 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
             .color = t.text2,
         });
     }
+    try navItem(u, t, settingsRect(s), icons.settings, "Settings", null, s.view == .settings, same(s.hover, .settings));
     try drawAccount(u, s, t);
 }
 
@@ -750,6 +843,7 @@ fn drawContent(u: *ui.Ui, s: State, t: *const Theme) !void {
             .local => "No projects on this Mac yet. New project makes one.",
             .cloud => "No projects on Cloud yet. New project makes one there.",
             .space => "No projects in this space yet. New project makes one.",
+            .settings => "",
         };
         try u.text(.{
             .x = c.x + pad,
@@ -763,7 +857,8 @@ fn drawContent(u: *ui.Ui, s: State, t: *const Theme) !void {
         return;
     }
     try u.beginClip(c);
-    if (s.layout == .list) try u.rect(.{
+    const sections = grouped(s);
+    if (s.layout == .list and !sections) try u.rect(.{
         .x = c.x + pad,
         .y = c.y - s.scroll,
         .w = c.w - 2 * pad,
@@ -771,6 +866,9 @@ fn drawContent(u: *ui.Ui, s: State, t: *const Theme) !void {
     }, t.border, 0);
     for (s.items, 0..) |it, i| {
         const r = itemRect(s, i);
+        if (sections and startsSection(s, i) and r.y - label_height < c.y + c.h and r.y + r.h > c.y) {
+            try drawSectionLabel(u, s, t, i);
+        }
         if (r.y + r.h < c.y or r.y > c.y + c.h) continue;
         const hovered = same(s.hover, .{ .item = i }) or same(s.hover, .{ .item_menu = i });
         switch (s.layout) {
@@ -804,12 +902,12 @@ fn marksOf(kind: Kind) []const []const u8 {
     };
 }
 
-fn marksWidth(kind: Kind) f32 {
+pub fn marksWidth(kind: Kind) f32 {
     return 6 + marks_size * @as(f32, @floatFromInt(marksOf(kind).len));
 }
 
 /// Where a project is: Cloud, this Mac, or both, in a small box at `x`, `y`.
-fn drawMarks(u: *ui.Ui, t: *const Theme, x: f32, y: f32, kind: Kind) !void {
+pub fn drawMarks(u: *ui.Ui, t: *const Theme, x: f32, y: f32, kind: Kind) !void {
     const marks = marksOf(kind);
     const size = marks_size;
     const box: ui.Rect = .{
