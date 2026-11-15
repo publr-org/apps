@@ -77,7 +77,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("../publr/scripts/tidy.zig"),
             .target = b.graph.host,
-            .optimize = .Debug,
+            .optimize = .debug,
         }),
     });
     const run_tidy = b.addRunArtifact(tidy);
@@ -88,6 +88,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tidy.step);
 
     const run = b.addRunArtifact(exe);
-    if (b.args) |args| run.addArgs(args);
+    run.addPassthruArgs();
     b.step("run", "Open Publr Studio").dependOn(&run.step);
 }

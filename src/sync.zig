@@ -66,7 +66,7 @@ fn bareName(line: []const u8) bool {
 /// Whether `reason` is Cloud (or the site) not answering at all.
 fn unreachable_(reason: []const u8) bool {
     const words = [_][]const u8{
-        "ConnectionRefused", "UnknownHostName", "NetworkUnreachable", "ConnectionTimedOut",
+        "ConnectionRefused",     "UnknownHostName",         "NetworkUnreachable",         "ConnectionTimedOut",
         "ConnectionResetByPeer", "TlsInitializationFailed", "TemporaryNameServerFailure",
     };
     for (words) |w| if (std.mem.indexOf(u8, reason, w) != null) return true;
@@ -150,7 +150,9 @@ const Job = struct {
         };
         const result = try std.process.run(a, shared.io, .{
             .argv = argv,
-            .cwd = .{ .path = job.dir },
+            .cwd = .{
+                .path = job.dir,
+            },
             .environ_map = shared.env,
         });
         defer a.free(result.stderr);

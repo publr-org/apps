@@ -16,12 +16,12 @@ pub const Stage = enum(u8) {
 
 /// What the sheet shows while it runs (written by the job, read each frame).
 pub const Progress = struct {
-    stage: std.atomic.Value(u8) = .init(@intFromEnum(Stage.packing)),
+    stage: std.atomic.Value(u8) = .init(@backingInt(Stage.packing)),
     sent: std.atomic.Value(u64) = .init(0),
     total: std.atomic.Value(u64) = .init(0),
 
     pub fn get(p: *const Progress) Stage {
-        return @enumFromInt(p.stage.load(.acquire));
+        return @fromBackingInt(@intCast(p.stage.load(.acquire)));
     }
 };
 
@@ -63,7 +63,7 @@ pub const Job = struct {
                 else => "Publr Cloud could not be reached.",
             };
         };
-        self.progress.stage.store(@intFromEnum(if (self.problem == null) Stage.done else Stage.failed), .release);
+        self.progress.stage.store(@backingInt(if (self.problem == null) Stage.done else Stage.failed), .release);
         native.runOnMain(self, finish);
     }
 
@@ -87,14 +87,16 @@ pub const Job = struct {
 
         var child = try std.process.spawn(self.io, .{
             .argv = &.{
-                self.publr, "deploy",
-                "--space",  self.space,
-                "--slug",   self.slug,
-                "--name",   self.name,
-                "--cloud",  self.base,
+                self.publr,   "deploy",
+                "--space",    self.space,
+                "--slug",     self.slug,
+                "--name",     self.name,
+                "--cloud",    self.base,
                 "--progress", "json",
             },
-            .cwd = .{ .path = self.site_dir },
+            .cwd = .{
+                .path = self.site_dir,
+            },
             .environ_map = &env,
             .stdin = .ignore,
             .stdout = .pipe,
@@ -122,7 +124,7 @@ pub const Job = struct {
             }) catch continue;
             // The progress page, shown in the project's tab while the deploy goes on.
             if (std.mem.eql(u8, event.stage, "page") and event.url.len > 0 and self.page.len == 0) {
-                self.page = a.dupeZ(u8, event.url) catch continue;
+                self.page = a.dupeSentinel(u8, event.url, 0) catch continue;
                 native.runOnMain(self, pageNamed);
                 continue;
             }
@@ -141,7 +143,7 @@ pub const Job = struct {
                 .failed => failed = event,
                 else => {},
             }
-            if (stage != .failed) self.progress.stage.store(@intFromEnum(stage), .release);
+            if (stage != .failed) self.progress.stage.store(@backingInt(stage), .release);
         }
         var errors: [4096]u8 = undefined;
         var err_reader = child.stderr.?.readerStreaming(self.io, &errors);
@@ -162,7 +164,10 @@ pub const Job = struct {
 };
 
 fn problemFor(code: []const u8) []const u8 {
-    const table = [_]struct { []const u8, []const u8 }{
+    const table = [_]struct {
+        []const u8,
+        []const u8,
+    }{
         .{ "Conflict", "That address was just taken. Pick another." },
         .{ "Invalid", "That address cannot be used. Pick another." },
         .{ "NotFound", "That space is not yours any more." },
@@ -194,7 +199,10 @@ pub fn readLink(a: std.mem.Allocator, io: std.Io, site_dir: []const u8) ?Link {
 }
 
 /// A job run with `publr` standing in as a script that prints `events` and exits `code`.
-fn tryDeploy(events: []const u8, code: u8) !struct { Job, std.heap.ArenaAllocator } {
+fn tryDeploy(events: []const u8, code: u8) !struct {
+    Job,
+    std.heap.ArenaAllocator,
+} {
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     const script = try std.fmt.allocPrint(std.testing.allocator, "#!/bin/sh\ncat <<'END'\n{s}END\nexit {d}\n", .{ events, code });

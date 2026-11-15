@@ -78,7 +78,7 @@ pub const Thumbs = struct {
     pub fn take(self: *Thumbs, name: []const u8, address: []const u8) void {
         const job: Job = .{
             .name = self.gpa.dupe(u8, name) catch return,
-            .address = self.gpa.dupeZ(u8, address) catch return,
+            .address = self.gpa.dupeSentinel(u8, address, 0) catch return,
         };
         self.queue.append(self.gpa, job) catch return;
         if (self.current == null) self.next();

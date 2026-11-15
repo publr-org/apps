@@ -194,7 +194,7 @@ pub const Cloud = struct {
 
     /// The dashboard page for the account's own settings (apps signed in, sign out).
     pub fn accountPage(self: *const Cloud, buf: []u8) [:0]const u8 {
-        return std.fmt.bufPrintZ(buf, "{s}/account", .{self.base}) catch "";
+        return std.fmt.bufPrintSentinel(buf, "{s}/account", .{self.base}, 0) catch "";
     }
 };
 
@@ -520,7 +520,9 @@ fn authorize(c: *Cloud) ![]u8 {
     const url = try std.fmt.allocPrintSentinel(a, "{s}/oauth/authorize?response_type=code&client_id={s}&redirect_uri={f}&code_challenge={s}&code_challenge_method=S256&state={s}", .{
         c.base,
         client_id,
-        std.fmt.alt(std.Uri.Component{ .raw = redirect }, .formatEscaped),
+        std.fmt.alt(std.Uri.Component{
+            .raw = redirect,
+        }, .formatEscaped),
         challenge,
         state,
     }, 0);
@@ -533,7 +535,9 @@ fn authorize(c: *Cloud) ![]u8 {
         code,
         verifier,
         client_id,
-        std.fmt.alt(std.Uri.Component{ .raw = redirect }, .formatEscaped),
+        std.fmt.alt(std.Uri.Component{
+            .raw = redirect,
+        }, .formatEscaped),
     });
     const reply = try request(io, a, c.base, .POST, "/oauth/token", .{
         .payload = form,

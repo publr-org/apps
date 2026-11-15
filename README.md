@@ -7,7 +7,7 @@ tab is the site's admin, signed in, in the system's web view.
 ```
 zig build run         open Studio
 zig build app         zig-out/Publr Studio.app
-zig build app -Doptimize=ReleaseSafe && ditto "zig-out/Publr Studio.app" "/Applications/Publr Studio.app"
+zig build app -Doptimize=safe && ditto "zig-out/Publr Studio.app" "/Applications/Publr Studio.app"
                       Studio in Applications, to open like any other app (ReleaseSafe:
                       std.http.Client breaks under ReleaseFast in Zig 0.16)
 zig build test        unit tests

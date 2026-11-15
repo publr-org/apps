@@ -143,7 +143,7 @@ pub const Sites = struct {
         const publr = try core.versions.binary_for(&config, site);
         try core.server.start(&config, &site, publr);
         try core.helper.ensure(&config, self.command_path);
-        return self.gpa.dupeZ(u8, try core.sign_on.entry(&config, &site, publr, path));
+        return self.gpa.dupeSentinel(u8, try core.sign_on.entry(&config, &site, publr, path), 0);
     }
 
     /// Opens the site's admin at `path` in the person's browser, signed in there.
