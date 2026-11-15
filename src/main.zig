@@ -507,7 +507,8 @@ fn addLocal(a: std.mem.Allocator, name: []const u8) void {
         syncing.check(s.name, siteDir(&db, s.name), s.live, nowMs(), false);
         state = syncing.stateOf(s.name) orelse .checking;
     }
-    const detail = if (linked) state.text() else if (s.running) "Running" else "Stopped";
+    const label_buf = a.alloc(u8, 128) catch &.{};
+    const detail = if (linked) syncing.labelOf(s.name, state, label_buf) else if (s.running) "Running" else "Stopped";
     var kb: [256]u8 = undefined;
     const thumb = if (thumbs.key(&kb, s.name)) |k| a.dupe(u8, k) catch null else null;
     items.append(gpa, .{
@@ -541,6 +542,14 @@ fn siteDir(buf: []u8, name: []const u8) []const u8 {
 }
 
 /// A folder as people read it (`~/Publr/shop`), in `a`.
+/// A failure's reason as the project's callout says it: a capital first.
+fn whyText(a: std.mem.Allocator, why: []const u8) []const u8 {
+    if (why.len == 0) return "";
+    const copy = a.dupe(u8, why) catch return why;
+    copy[0] = std.ascii.toUpper(copy[0]);
+    return copy;
+}
+
 fn shortFolder(a: std.mem.Allocator, folder: []const u8) []const u8 {
     var buf: [1024]u8 = undefined;
     return a.dupe(u8, sites_module.shortPath(&buf, home_dir, folder)) catch "";
@@ -791,7 +800,6 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
             .{
                 .title = "Open copy on this Mac",
                 .tag = Action.preview_changes,
-                .enabled = state == .unsent or state == .waiting,
             },
             .{
                 .title = "View live site",
@@ -1664,6 +1672,7 @@ fn startDeploy() void {
         .progress = &deploy_progress,
         .arena = .init(gpa),
         .done = deployFinished,
+        .shown = deployPageShown,
     };
     const a = job.arena.allocator();
     // `publr deploy` in the site's folder: the command Studio carries.
@@ -1700,6 +1709,23 @@ fn deployBusyText() []const u8 {
     };
 }
 
+/// The deploy's progress page, named by the command: the sheet closes and the site's own tab
+/// shows the page, as Clone to this Mac does.
+fn deployPageShown(job: *deploying.Job) void {
+    if (open_sheet == .deploy) closeSheet();
+    sheet_busy = null;
+    openLocal(job.name);
+    for (tabs.items, 0..) |t, i| {
+        const pt = t.project orelse continue;
+        if (!std.mem.eql(u8, pt.folder, job.name)) continue;
+        pt.page = .admin;
+        showTab(i);
+        loadIn(t, job.page);
+        break;
+    }
+    redrawAll();
+}
+
 fn deployFinished(job: *deploying.Job) void {
     defer {
         job.arena.deinit();
@@ -1708,6 +1734,15 @@ fn deployFinished(job: *deploying.Job) void {
     }
     sheet_busy = null;
     if (auto_deploy) std.debug.print("studio: deploy finished: {s}{s}\n", .{ job.problem orelse "live at ", if (job.problem == null) job.address else "" });
+    // Its page showed how it ended: the card becomes the linked project, nothing more to say.
+    if (job.page.len > 0) {
+        sites.refresh();
+        cloud.refresh();
+        if (job.problem == null) {
+            if (sites.find(job.name)) |s| thumbs.take(s.name, s.address);
+        }
+        return redrawAll();
+    }
     if (job.problem) |pr| {
         sheet_error = pr;
         window.setTextInput(true);
@@ -1906,7 +1941,7 @@ fn projectPage(i: usize) project.State {
         .name = t.name,
         .kind = kind,
         .status = if (pt.note.len > 0) pt.note else switch (kind) {
-            .both => state.text(),
+            .both => syncing.labelOf(pt.folder, state, a.alloc(u8, 128) catch &.{}),
             .local => if (local.?.running) "Running on this Mac" else "Stopped",
             .cloud => "Live on Cloud",
         },
@@ -1918,6 +1953,7 @@ fn projectPage(i: usize) project.State {
             .failed => .failed,
             else => .none,
         },
+        .failed_why = whyText(a, syncing.whyOf(pt.folder)),
         .address = if (pt.live.len > 0) pt.live else if (local) |s| s.address else "",
         .folder = if (local) |s| shortFolder(a, s.folder) else "",
         .pin = if (local) |s| s.pin else "",

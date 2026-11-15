@@ -46,6 +46,10 @@ pub const Job = struct {
     project_id: []const u8 = "",
     arena: std.heap.ArenaAllocator,
     done: *const fn (job: *Job) void,
+    /// The command's progress page, once it names it; `shown` is called with it on the main
+    /// thread.
+    page: [:0]const u8 = "",
+    shown: *const fn (job: *Job) void,
 
     pub fn start(self: *Job) !void {
         const t = try std.Thread.spawn(.{}, run, .{self});
@@ -66,6 +70,11 @@ pub const Job = struct {
     fn finish(ctx: ?*anyopaque) callconv(.c) void {
         const self: *Job = @ptrCast(@alignCast(ctx));
         self.done(self);
+    }
+
+    fn pageNamed(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *Job = @ptrCast(@alignCast(ctx));
+        self.shown(self);
     }
 
     /// `publr deploy` in the site's folder, the command Studio carries: it exports the site
@@ -103,6 +112,7 @@ pub const Job = struct {
             project_id: []const u8 = "",
             @"error": []const u8 = "",
             message: []const u8 = "",
+            url: []const u8 = "",
         };
         var failed: ?Event = null;
         while (reader.interface.takeDelimiter('\n') catch null) |line| {
@@ -110,6 +120,12 @@ pub const Job = struct {
                 .ignore_unknown_fields = true,
                 .allocate = .alloc_always,
             }) catch continue;
+            // The progress page, shown in the project's tab while the deploy goes on.
+            if (std.mem.eql(u8, event.stage, "page") and event.url.len > 0 and self.page.len == 0) {
+                self.page = a.dupeZ(u8, event.url) catch continue;
+                native.runOnMain(self, pageNamed);
+                continue;
+            }
             const stage = std.meta.stringToEnum(Stage, event.stage) orelse continue;
             switch (stage) {
                 .uploading => {
@@ -212,6 +228,7 @@ fn tryDeploy(events: []const u8, code: u8) !struct { Job, std.heap.ArenaAllocato
         .progress = progress,
         .arena = .init(a),
         .done = undefined,
+        .shown = undefined,
     };
     job.steps() catch {};
     return .{ job, arena };

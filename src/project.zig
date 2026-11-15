@@ -127,6 +127,8 @@ pub const State = struct {
     running: bool,
     changed: bool,
     callout: Callout,
+    /// Why keeping it in sync failed, as the command said it; the failed callout's words.
+    failed_why: []const u8 = "",
     /// The project's address: live on Cloud, else this Mac's.
     address: []const u8,
     /// The Cloud space; empty when not on Cloud or not known.
@@ -886,7 +888,7 @@ fn drawCallout(u: *ui.Ui, s: State, t: *const Theme) !void {
     const title = switch (s.callout) {
         .unsent => "Changes not on Cloud",
         .waiting => "Waiting for review",
-        .failed, .none => "Can\u{2019}t reach Cloud",
+        .failed, .none => if (s.failed_why.len > 0) s.failed_why else "Can\u{2019}t reach Cloud",
     };
     const text_x = icon_box.x + icon_box.w + 14;
     const text_w = (if (s.callout == .failed) r.x + r.w else calloutButton(s, u).x) - text_x - 16;

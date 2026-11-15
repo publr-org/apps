@@ -37,6 +37,63 @@ pub const State = enum {
     }
 };
 
+/// Why a command failed, from what it wrote: the last line that says something (not a bare
+/// error name, `publr: FetchFailed`), without its `publr: ` and with the address it names
+/// left off. Empty when it said nothing.
+pub fn reasonOf(said: []const u8) []const u8 {
+    var found: []const u8 = "";
+    var lines = std.mem.tokenizeScalar(u8, said, '\n');
+    while (lines.next()) |raw| {
+        var line = std.mem.trim(u8, raw, " \r\t");
+        if (std.mem.startsWith(u8, line, "publr: ")) line = line["publr: ".len..];
+        if (line.len == 0 or bareName(line)) continue;
+        found = line;
+    }
+    // `… (https://…)`: the address is for the log, not the card.
+    if (std.mem.lastIndexOf(u8, found, " (")) |at| {
+        if (std.mem.indexOf(u8, found[at..], "://") != null) found = found[0..at];
+    }
+    return found;
+}
+
+/// `ConnectionRefused`: one word, a capital first, as Zig names an error.
+fn bareName(line: []const u8) bool {
+    if (!std.ascii.isUpper(line[0])) return false;
+    for (line) |c| if (!std.ascii.isAlphanumeric(c)) return false;
+    return true;
+}
+
+/// Whether `reason` is Cloud (or the site) not answering at all.
+fn unreachable_(reason: []const u8) bool {
+    const words = [_][]const u8{
+        "ConnectionRefused", "UnknownHostName", "NetworkUnreachable", "ConnectionTimedOut",
+        "ConnectionResetByPeer", "TlsInitializationFailed", "TemporaryNameServerFailure",
+    };
+    for (words) |w| if (std.mem.indexOf(u8, reason, w) != null) return true;
+    return false;
+}
+
+/// What a failed folder's card says: Cloud not answering, or the reason's first part
+/// (`couldn't download Publr 0.7.0: NotFound` → `Couldn't download Publr 0.7.0`).
+pub fn failedLabel(reason: []const u8, buf: []u8) []const u8 {
+    if (reason.len == 0 or unreachable_(reason)) return State.failed.text();
+    const short = reason[0 .. std.mem.indexOf(u8, reason, ": ") orelse reason.len];
+    const n = @min(short.len, buf.len);
+    @memcpy(buf[0..n], short[0..n]);
+    if (n > 0) buf[0] = std.ascii.toUpper(buf[0]);
+    return buf[0..n];
+}
+
+test "a failed command's reason and its card's label" {
+    var buf: [128]u8 = undefined;
+    const fetch = "publr: fetching Publr 0.7.0\u{2026}\n" ++
+        "publr: couldn't download Publr 0.7.0: NotFound (https://github.com/x)\n\npublr: FetchFailed\n";
+    try std.testing.expectEqualStrings("couldn't download Publr 0.7.0: NotFound", reasonOf(fetch));
+    try std.testing.expectEqualStrings("Couldn't download Publr 0.7.0", failedLabel(reasonOf(fetch), &buf));
+    try std.testing.expectEqualStrings("Couldn\u{2019}t reach Cloud", failedLabel(reasonOf("publr: ConnectionRefused\n"), &buf));
+    try std.testing.expectEqualStrings("Couldn\u{2019}t reach Cloud", failedLabel("", &buf));
+}
+
 const Entry = struct {
     state: State = .checking,
     busy: bool = false,
@@ -45,6 +102,8 @@ const Entry = struct {
     signed_in: bool = false,
     /// While waiting: where its branch is reviewed on Cloud.
     review: []u8 = &.{},
+    /// Once failed: why, as the command said it (`reasonOf`).
+    why: []u8 = &.{},
 };
 
 /// How long a folder's state stands before it is asked again.
@@ -66,6 +125,8 @@ const Job = struct {
     stop_first: bool,
     exit: u8 = 255,
     out: []u8 = &.{},
+    /// What the command said, once it failed (`reasonOf`).
+    why: []u8 = &.{},
     fn run(job: *Job) void {
         job.exec() catch |e| std.debug.print("studio: sync {s} {t}: {t}\n", .{ job.name, job.command, e });
         native.runOnMain(job, finish);
@@ -95,7 +156,19 @@ const Job = struct {
         defer a.free(result.stderr);
         job.out = result.stdout;
         job.exit = if (result.term == .exited) result.term.exited else 255;
-        if (job.exit != 0) std.debug.print("studio: publr {t} in {s}: {s}\n", .{ job.command, job.name, result.stderr });
+        if (job.exit != 0) {
+            std.debug.print("studio: publr {t} in {s}: {s}\n", .{ job.command, job.name, result.stderr });
+            job.why = try a.dupe(u8, reasonOf(result.stderr));
+        }
+        // Stopped for the pull, running again after it, whatever it did.
+        if (job.stop_first) {
+            const started = try std.process.run(a, shared.io, .{
+                .argv = &.{ shared.publr, "start", job.dir },
+                .environ_map = shared.env,
+            });
+            a.free(started.stdout);
+            a.free(started.stderr);
+        }
     }
 
     fn finish(ctx: ?*anyopaque) callconv(.c) void {
@@ -107,6 +180,7 @@ const Job = struct {
             a.free(job.site);
             a.free(job.token);
             a.free(job.out);
+            a.free(job.why);
             a.destroy(job);
         }
         finished(job);
@@ -162,6 +236,18 @@ pub fn reviewOf(name: []const u8) ?[]const u8 {
 pub fn stateOf(name: []const u8) ?State {
     const e = shared.entries.get(name) orelse return null;
     return e.state;
+}
+
+/// Why the folder `name` failed, as its command said it; empty when it has not.
+pub fn whyOf(name: []const u8) []const u8 {
+    const e = shared.entries.get(name) orelse return "";
+    return if (e.state == .failed) e.why else "";
+}
+
+/// What the folder's card says: its state, or for a failure a short reason.
+pub fn labelOf(name: []const u8, state: State, buf: []u8) []const u8 {
+    if (state != .failed) return state.text();
+    return failedLabel(whyOf(name), buf);
 }
 
 /// Asks where the folder `name` (at `dir`, linked to `site`) is, unless it was asked lately
@@ -240,11 +326,32 @@ const Where = struct {
     review: []const u8 = "",
 };
 
+/// After a failure, Home drawn again once `recheck_ms` passed, which asks again: a failure
+/// is tried again even while nobody touches the window.
+fn retryLater() void {
+    const t = std.Thread.spawn(.{}, struct {
+        fn wait() void {
+            std.Io.sleep(shared.io, .fromMilliseconds(recheck_ms + 1000), .awake) catch return;
+            native.runOnMain(null, again);
+        }
+        fn again(_: ?*anyopaque) callconv(.c) void {
+            shared.changed();
+        }
+    }.wait, .{}) catch return;
+    t.detach();
+}
+
 /// What a job found, and what follows from it: on the main thread.
 fn finished(job: *Job) void {
     defer shared.changed();
+    defer if (shared.entries.get(job.name)) |held| {
+        if (held.state == .failed) retryLater();
+    };
     const e = shared.entries.getPtr(job.name) orelse return;
     e.busy = false;
+    // Kept until the next answer: why it failed, for the card and the project's details.
+    if (e.why.len > 0) shared.gpa.free(e.why);
+    e.why = shared.gpa.dupe(u8, job.why) catch &.{};
     switch (job.command) {
         .check => {
             if (job.exit == signed_out_code) return signIn(job.name, e);
