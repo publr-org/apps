@@ -111,8 +111,8 @@ pub const Ui = struct {
     /// The fonts, the pictures and the renderer, as PublrDesign's documents have them: the
     /// frame's nodes are this session's page when drawn on the GPU (`draw`).
     session: *engine.session.Session,
-    /// The GPU path, once `attachGpu` gave it a device.
-    gpu: ?*draw_mod.Gpu = null,
+    /// The GPU path, once `attachGpu` gave it a device (none in a browser).
+    gpu: if (native.web) void else ?*draw_mod.Gpu = if (native.web) {} else null,
     next_id: u32 = 0,
 
     /// A UI on the heap (the GPU path points into it, so it must not move).
@@ -129,7 +129,9 @@ pub const Ui = struct {
     }
 
     pub fn destroy(self: *Ui) void {
-        if (self.gpu) |g| g.destroy();
+        if (!native.web) {
+            if (self.gpu) |g| g.destroy();
+        }
         self.session.destroy();
         self.nodes.deinit(self.gpa);
         self.clips.deinit(self.gpa);
@@ -249,7 +251,9 @@ pub const Ui = struct {
         const replaced = self.session.images.contains(key);
         try self.session.addImage(key, img);
         // The GPU's copy of the old picture goes.
-        if (replaced) if (self.gpu) |g| g.host.forgetImage(key);
+        if (!native.web) {
+            if (replaced) if (self.gpu) |g| g.host.forgetImage(key);
+        }
     }
 
     pub fn hasImage(self: *const Ui, key: []const u8) bool {
@@ -371,6 +375,7 @@ pub const Ui = struct {
     /// Gives the UI the GPU path: frames drawn with `draw` on `gpu`'s device, into
     /// targets of `format` (a window's surface format).
     pub fn attachGpu(self: *Ui, gpu: *native.gpu.Gpu, format: native.gpu.c.WGPUTextureFormat) !void {
+        if (native.web) return;
         if (self.gpu != null) return;
         self.gpu = try draw_mod.Gpu.create(self.gpa, gpu, format);
     }
@@ -380,6 +385,19 @@ pub const Ui = struct {
     /// and submits it. Answers whether to draw again soon: something of this frame is
     /// still coming (glyph masks over the per-frame budget).
     pub fn draw(self: *Ui, view: native.gpu.c.WGPUTextureView, width: u32, height: u32, scale: f32, background: Color) !bool {
+        // In a browser the frame is drawn on the CPU and the window puts it on the canvas.
+        if (native.web) {
+            var px = try self.render(width, height, scale, background);
+            defer px.deinit(self.gpa);
+            const bytes = try self.gpa.alloc(u8, px.data.len * 4);
+            defer self.gpa.free(bytes);
+            // Opaque frames (the UI paints its background): premultiplied is straight.
+            for (px.data, 0..) |p, i| inline for (0..4) |k| {
+                bytes[i * 4 + k] = @intFromFloat(@round(std.math.clamp(p[k], 0, 1) * 255));
+            };
+            view.present(bytes, width, height);
+            return false;
+        }
         const g = self.gpu orelse return error.NoGpu;
         return g.draw(self, view, width, height, scale, background);
     }

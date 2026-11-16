@@ -4,6 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // In a browser page (wasm32-wasi) the platform is the page's: no wgpu-native, no
+    // frameworks, frames drawn on the CPU (`src/web/`).
+    if (target.result.os.tag == .wasi) {
+        return add_web(b, target, optimize);
+    }
+
     // wgpu-native: the WebGPU C API, prebuilt (fetched by build.zig.zon), linked statically.
     const wgpu_pkg = b.lazyDependency("wgpu_macos_aarch64", .{}) orelse return;
     const wgpu_c = b.addTranslateC(.{
@@ -121,6 +127,35 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(demo);
     const run = b.addRunArtifact(demo);
     b.step("demo", "Run the demo window").dependOn(&run.step);
+}
+
+/// The `native` and `ui` modules for a browser page.
+fn add_web(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.Optimize) void {
+    const native = b.addModule("native", .{
+        .root_source_file = b.path("src/native.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const engine = b.dependency("publr_engine", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    _ = b.addModule("ui", .{
+        .root_source_file = b.path("src/ui/ui.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{
+                .name = "native",
+                .module = native,
+            },
+            .{
+                .name = "publr_engine",
+                .module = engine.module("publr_engine"),
+            },
+        },
+    });
 }
 
 pub const BundleOptions = struct {
