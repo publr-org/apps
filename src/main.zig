@@ -19,6 +19,7 @@ const Sites = sites_module.Sites;
 const Thumbs = @import("thumbs.zig").Thumbs;
 const sheet = @import("sheet.zig");
 const settings = @import("settings.zig");
+const command_line = @import("command_line.zig");
 const Cloud = @import("cloud.zig").Cloud;
 const deploying = @import("deploy.zig");
 
@@ -239,6 +240,7 @@ pub fn main(init: std.process.Init) !void {
     };
     support_dir = try std.fs.path.join(gpa, &.{ home_dir, "Library/Application Support/Publr Desktop" });
     Io.Dir.cwd().createDirPath(io, support_dir) catch {};
+    native.spawn(command_line.ensure, .{ gpa, io, env }) catch {};
 
     native.init(app_name);
     native.onMenu(null, onMenu);
@@ -2701,14 +2703,10 @@ var settings_shown: []const []const u8 = &.{};
 var settings_publr: ?[]const u8 = null;
 /// The admin set for new sites (`publr config admin`); empty when none is.
 var settings_admin: []const u8 = "";
-var settings_command: settings.Command = .missing;
 /// Advanced is unfolded (for this run only).
 var settings_advanced = false;
 var settings_busy: ?[]const u8 = null;
 var settings_problem: ?[]const u8 = null;
-
-/// Where Terminal's `publr` goes: the place editors put their commands.
-const command_link = "/usr/local/bin/publr";
 
 /// Home on its Settings page, read from the config afresh.
 fn openSettings() void {
@@ -2740,26 +2738,8 @@ fn loadSettings() void {
     settings_shown = shown;
     settings_publr = if (config.publr.len > 0) shortFolder(a, config.publr) else null;
     settings_admin = config.admin;
-    settings_command = commandState(a);
 }
 
-/// Whether Terminal's `publr` is Desktop's, another, or none.
-fn commandState(a: std.mem.Allocator) settings.Command {
-    var buf: [1024]u8 = undefined;
-    if (Io.Dir.cwd().readLink(io, command_link, &buf)) |n| {
-        if (std.mem.eql(u8, buf[0..n], sites.command_path)) return .installed;
-    } else |_| {}
-    const found = sites_module.onPath(a, io, env_map) orelse {
-        Io.Dir.cwd().access(io, command_link, .{}) catch return .missing;
-        return .{
-            .other = command_link,
-        };
-    };
-    if (std.mem.eql(u8, found, sites.command_path)) return .installed;
-    return .{
-        .other = found,
-    };
-}
 
 /// Settings' admin for new sites, as people read it.
 fn settingsAdmin() []const u8 {
@@ -2779,7 +2759,6 @@ fn settingsState() settings.State {
         .folders = settings_shown,
         .publr = settings_publr,
         .admin = settingsAdmin(),
-        .command = settings_command,
         .advanced = settings_advanced,
         .busy = settings_busy,
         .problem = settings_problem,
@@ -2796,7 +2775,6 @@ fn clickSettings(t: settings.Target) void {
         .change_admin => openAdminSheet(),
         .add_folder => chooseFolder(.add),
         .remove_folder => |i| removeFolder(i),
-        .install => installCommand(),
         .advanced => settings_advanced = !settings_advanced,
         .choose_publr => choosePublr(null, false),
         .clear_publr => choosePublr(null, true),
@@ -2975,63 +2953,6 @@ fn choosePublr(name: ?[]const u8, clear: bool) void {
     native.spawn(ChoosePublr.run, .{job}) catch {
         if (name == null) settings_busy = null;
         if (job.name) |n| gpa.free(n);
-        gpa.destroy(job);
-        return;
-    };
-}
-
-/// `/usr/local/bin/publr` made a link to the command inside Desktop: directly when the folder
-/// lets this user write, else through the system's administrator prompt.
-const Install = struct {
-    ok: bool = false,
-
-    fn run(job: *Install) void {
-        job.ok = link() or linkAsAdmin();
-        native.runOnMain(job, finish);
-    }
-
-    fn link() bool {
-        const cwd = Io.Dir.cwd();
-        cwd.createDirPath(io, "/usr/local/bin") catch return false;
-        cwd.deleteFile(io, command_link) catch |e| if (e != error.FileNotFound) return false;
-        cwd.symLink(io, sites.command_path, command_link, .{}) catch return false;
-        return true;
-    }
-
-    fn linkAsAdmin() bool {
-        const script = std.fmt.allocPrint(gpa, "do shell script \"mkdir -p /usr/local/bin && ln -sf '{s}' {s}\" with administrator privileges", .{ sites.command_path, command_link }) catch return false;
-        defer gpa.free(script);
-        const result = std.process.run(gpa, io, .{
-            .argv = &.{ "osascript", "-e", script },
-        }) catch return false;
-        gpa.free(result.stdout);
-        gpa.free(result.stderr);
-        return result.term == .exited and result.term.exited == 0;
-    }
-
-    fn finish(ctx: ?*anyopaque) callconv(.c) void {
-        const job: *Install = @ptrCast(@alignCast(ctx));
-        defer gpa.destroy(job);
-        settings_busy = null;
-        settings_problem = if (job.ok) null else "publr was not installed.";
-        loadSettings();
-        redrawAll();
-    }
-};
-
-fn installCommand() void {
-    if (settings_busy != null or settings_command != .missing) return;
-    // `DESKTOP_NO_INSTALL`: the button is pressed without touching /usr/local/bin (tests).
-    if (env_map.get("DESKTOP_NO_INSTALL") != null) {
-        std.debug.print("desktop: would link {s} to {s}\n", .{ command_link, sites.command_path });
-        return;
-    }
-    const job = gpa.create(Install) catch return;
-    job.* = .{};
-    settings_busy = "Installing publr…";
-    redrawAll();
-    native.spawn(Install.run, .{job}) catch {
-        settings_busy = null;
         gpa.destroy(job);
         return;
     };

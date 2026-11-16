@@ -1,8 +1,8 @@
 //! Settings: a page of Home's, beside its sidebar, set as Home's pages are (the bar with where
 //! you are, the page's title, then its sections). Where new sites go (the default folder),
-//! the other folders whose sites Desktop and `publr ls` show, the `publr` command in Terminal
-//! (Install `publr` in PATH, as editors put their command there), and, folded under Advanced,
-//! the Publr build every project runs instead of its own version (one built from source).
+//! the other folders whose sites Desktop and `publr ls` show, the account email new sites
+//! get, and, folded under Advanced, the Publr build every project runs instead of its own
+//! version (one built from source).
 //! The same config the command reads (`publr config`). Layout and hit testing together.
 
 const std = @import("std");
@@ -27,15 +27,6 @@ const button_text: ui.TextStyle = .{
 };
 
 /// What Terminal's `publr` is.
-pub const Command = union(enum) {
-    /// Desktop's, linked from `/usr/local/bin/publr`.
-    installed,
-    /// Another one answers on the PATH (Homebrew's, say); Desktop leaves it.
-    other: []const u8,
-    /// None: Install puts Desktop's there.
-    missing,
-};
-
 pub const State = struct {
     /// Where the page starts (under the tab bar) and where its left edge is (the sidebar's
     /// right edge).
@@ -51,7 +42,6 @@ pub const State = struct {
     publr: ?[]const u8,
     /// Who every new site gets as its admin, as people read it ("Your Cloud account", an email).
     admin: []const u8,
-    command: Command,
     /// Advanced is unfolded.
     advanced: bool,
     /// Said in place of the buttons' note while something runs ("Choosing a folder…"), or
@@ -67,7 +57,6 @@ pub const Target = union(enum) {
     add_folder,
     remove_folder: usize,
     change_admin,
-    install,
     advanced,
     choose_publr,
     clear_publr,
@@ -124,22 +113,12 @@ fn adminChangeRect(s: State, u: *ui.Ui) ui.Rect {
     return rowButton(u, adminRow(s, u), change_label);
 }
 
-fn commandTitle(s: State, u: *ui.Ui) f32 {
-    const admin = adminRow(s, u);
-    return admin.y + admin.h + section_gap;
-}
-
-fn installRect(s: State, u: *ui.Ui) ui.Rect {
-    // The button, or "Already in PATH" in its place.
-    return buttonAt(u, column(s).x, commandTitle(s, u) + title_step, install_label);
-}
-
 fn advancedRect(s: State, u: *ui.Ui) ui.Rect {
-    const install = installRect(s, u);
+    const admin = adminRow(s, u);
     const c = column(s);
     return .{
         .x = c.x - 8,
-        .y = install.y + install.h + section_gap - 6,
+        .y = admin.y + admin.h + section_gap - 6,
         .w = c.w + 16,
         .h = 32,
     };
@@ -213,7 +192,6 @@ fn buttonAt(u: *ui.Ui, x: f32, y: f32, label: []const u8) ui.Rect {
 const change_label = "Change…";
 const remove_label = "Remove";
 const add_label = "Add folder…";
-const install_label = "Add Publr to PATH";
 const choose_label = "Choose build…";
 const clear_label = "Back to default";
 
@@ -233,7 +211,6 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     for (0..s.folders.len) |i| if (removeRect(s, u, i).contains(x, y)) return .{ .remove_folder = i };
     if (addRect(s, u).contains(x, y)) return .add_folder;
     if (adminChangeRect(s, u).contains(x, y)) return .change_admin;
-    if (s.command == .missing and installRect(s, u).contains(x, y)) return .install;
     if (advancedRect(s, u).contains(x, y)) return .advanced;
     if (!s.advanced) return .none;
     if (chooseRect(s, u).contains(x, y)) return .choose_publr;
@@ -262,7 +239,7 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = s.top + header_height + 60,
         .w = c.w,
         .h = 20,
-    }, s.problem orelse s.busy orelse "Where projects live on this Mac, and the publr command.", .{
+    }, s.problem orelse s.busy orelse "Where projects live on this Mac, and who new sites belong to.", .{
         .size = 14,
         .color = if (s.problem != null) t.danger else t.text2,
     });
@@ -289,27 +266,6 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
     try sectionTitle(u, t, c, newSitesTitle(s, u), "Default account email");
     try pathRow(u, t, adminRow(s, u), s.admin);
     try button(u, t, adminChangeRect(s, u), change_label, same(s.hover, .change_admin), true);
-
-    // Terminal's command.
-    const ct = commandTitle(s, u);
-    try sectionTitle(u, t, c, ct, "Command line");
-    const said = switch (s.command) {
-        .installed, .other => "Already in PATH",
-        .missing => "",
-    };
-    try u.text(.{
-        .x = c.x,
-        .y = ct + title_step,
-        .w = c.w,
-        .h = 32,
-    }, said, .{
-        .size = 13,
-        .color = t.text2,
-        .truncate = false,
-    });
-    if (s.command == .missing) {
-        try button(u, t, installRect(s, u), install_label, same(s.hover, .install), true);
-    }
 
     // Advanced, folded.
     const a = advancedRect(s, u);

@@ -24,8 +24,9 @@ It carries the command beside its executable (`Contents/MacOS/publr`, `zig-out/b
 and runs it for sync and deploy (`pull`, `push`, `login --sign-on`, `pack`); `$DESKTOP_PUBLR`
 or the PATH's `publr` when that is missing. `$PUBLR_CONFIG` points at another config (tests).
 `--open <folder>` opens that site's tab (`publr desktop <name>`). Settings: the default folder,
-other folders, and Add Publr to PATH (`/usr/local/bin/publr`; `DESKTOP_NO_INSTALL=1`
-only prints what it would link).
+other folders and the default account email. Each start puts the command it carries on
+the PATH, as `cli/install.sh` does (`src/command_line.zig`): `~/.local/bin/publr` a link to it,
+that folder added to `~/.zshrc` or `~/.bashrc` once; a `publr` file already there is kept.
 
 `SELF_TEST=1` prints the window's number for `screencapture -o -l<number>`. The tabs open
 at quit are reopened at the next start (`~/Library/Application Support/Publr Desktop`).
