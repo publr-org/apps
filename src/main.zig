@@ -151,6 +151,8 @@ var open_sheet: ?enum {
     deployed,
     /// Settings' admin for new sites.
     admin,
+    /// The first time Desktop opens: Publr Cloud, or an email of your own.
+    welcome,
 } = null;
 var deploy_progress: deploying.Progress = .{};
 var auto_deploy = false;
@@ -359,6 +361,7 @@ pub fn main(init: std.process.Init) !void {
         };
     };
     if (env.get("DESKTOP_SIGN_IN") != null and cloud.status == .signed_out) cloud.signIn();
+    welcomeIfNew();
     if (self_test) std.debug.print("desktop: window {d}, {d} sites, {d} tabs\n", .{ window.number(), sites.list.items.len, tabs.items.len });
     native.run();
 }
@@ -1563,6 +1566,39 @@ fn openNewSite() void {
     redrawAll();
 }
 
+/// The first time Desktop opens on a Mac with nothing set (no projects, no default account
+/// email, not signed in to Cloud), it asks once how the person's projects are owned: their
+/// Publr Cloud account, or an email of their own. Never asked again.
+fn welcomeIfNew() void {
+    const marker = std.fs.path.join(gpa, &.{ support_dir, "welcomed" }) catch return;
+    defer gpa.free(marker);
+    if (Io.Dir.cwd().access(io, marker, .{})) |_| return else |_| {}
+    Io.Dir.cwd().writeFile(io, .{
+        .sub_path = marker,
+        .data = "",
+    }) catch return;
+    loadSavedAdmin();
+    if (saved_admin.len > 0 or cloud.status == .signed_in or sites.list.items.len > 0) return;
+    open_sheet = .welcome;
+    sheet_hover = .none;
+    redrawAll();
+}
+
+fn welcomeState() sheet.State {
+    const size = window.size();
+    return .{
+        .title = "Welcome to Publr Desktop",
+        .description = "Sign in to Publr Cloud to use one account for all your projects and put them online in one click. It's free. Or keep everything on this Mac.",
+        .fields = &.{},
+        .primary = "Sign in to Publr Cloud",
+        .primary_enabled = true,
+        .secondary = "Continue without Cloud",
+        .hover = sheet_hover,
+        .window_width = @floatCast(size.w),
+        .window_height = @floatCast(size.h),
+    };
+}
+
 /// Settings' admin for new sites, in a sheet of its own.
 fn openAdminSheet() void {
     open_sheet = .admin;
@@ -1641,6 +1677,7 @@ fn adminProblem(email: []const u8) ?[]const u8 {
 
 fn sheetState(fields: *[1]sheet.Field) sheet.State {
     if (open_sheet == .admin) return adminState(fields);
+    if (open_sheet == .welcome) return welcomeState();
     if (open_sheet == .deploy) return deployState(fields);
     if (open_sheet == .deployed) return deployedState();
     var state = if (new_where == .cloud and cloudOffered()) projectState(fields) else localState(fields);
@@ -1702,7 +1739,7 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
         },
         .mouse_down => |m| switch (sheet.hit(sheetState(&fields), u, m.x, m.y)) {
             .primary => primaryAction(),
-            .cancel => if (deploy_job == null) closeSheet(),
+            .cancel => if (open_sheet == .welcome) openAdminSheet() else if (deploy_job == null) closeSheet(),
             .option => |i| {
                 new_where = if (i == 1) .cloud else .local;
                 sheet_error = null;
@@ -1726,9 +1763,9 @@ fn sheetField() *ui.TextField {
     return &name_field;
 }
 
-/// The sheet takes typing (the deployed sheet has no field).
+/// The sheet takes typing (the deployed and welcome sheets have no field).
 fn sheetTypes() bool {
-    return open_sheet != .deployed and sheet_busy == null and deploy_job == null;
+    return open_sheet != .deployed and open_sheet != .welcome and sheet_busy == null and deploy_job == null;
 }
 
 fn fieldChanged() void {
@@ -1744,6 +1781,10 @@ fn primaryAction() void {
     switch (open_sheet orelse return) {
         .new_project => if (new_where == .cloud and cloudOffered()) createProject() else createSite(),
         .admin => saveAdmin(),
+        .welcome => {
+            closeSheet();
+            cloud.signIn();
+        },
         .deploy => startDeploy(),
         .deployed => {
             var buf: [512]u8 = undefined;
