@@ -81,7 +81,7 @@ const ways = [_]Way{
     .{
         .choice = .by_hand,
         .icon = icons.users,
-        .title = "Set up accounts myself",
+        .title = "Set up an account for every project",
         .line = "Each project asks you to make its admin account the first time you open it.",
     },
     .{
@@ -96,7 +96,7 @@ const width: f32 = 560;
 const panel_pad: f32 = 28;
 const button_height: f32 = 44;
 const benefit_step: f32 = 56;
-const tile_height: f32 = 176;
+const tile_height: f32 = 196;
 const tile_gap: f32 = 12;
 const field_height: f32 = 40;
 const link_label = "How accounts work";
@@ -391,19 +391,23 @@ fn drawTile(u: *ui.Ui, s: State, t: *const Theme, way: Way) !void {
         .w = 8,
         .h = 8,
     }, t.text, 4);
+    // The title on one line, or two when it is longer; the words follow it.
+    const title_style: ui.TextStyle = .{
+        .size = 15,
+        .weight = 600,
+        .color = t.text,
+        .truncate = false,
+    };
+    const title_height: f32 = if (u.measure(way.title, title_style) > r.w - 40) 42 else 20;
     try u.text(.{
         .x = r.x + 20,
         .y = r.y + 72,
         .w = r.w - 40,
-        .h = 20,
-    }, way.title, .{
-        .size = 15,
-        .weight = 600,
-        .color = t.text,
-    });
+        .h = title_height,
+    }, way.title, title_style);
     try u.text(.{
         .x = r.x + 20,
-        .y = r.y + 98,
+        .y = r.y + 72 + title_height + 6,
         .w = r.w - 40,
         .h = 58,
     }, way.line, .{
