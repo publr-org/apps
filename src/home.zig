@@ -114,6 +114,8 @@ pub const Target = union(enum) {
     settings,
     show_grid,
     show_list,
+    /// Every site on this Mac and every Cloud project read again.
+    refresh,
     new_site,
     item: usize,
     item_menu: usize,
@@ -411,6 +413,16 @@ fn layoutRect(s: State, which: Layout) ui.Rect {
     };
 }
 
+/// Refresh, left of the grid and list button.
+fn refreshRect(s: State) ui.Rect {
+    return .{
+        .x = s.width - pad - 64 - 8 - 32,
+        .y = s.top + 9,
+        .w = 32,
+        .h = 30,
+    };
+}
+
 fn menuItemHeight(it: MenuItem) f32 {
     return if (it.separator) 9 else menu_item;
 }
@@ -469,6 +481,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (y < s.top + header_height) {
         if (layoutRect(s, .grid).contains(x, y)) return .show_grid;
         if (layoutRect(s, .list).contains(x, y)) return .show_list;
+        if (refreshRect(s).contains(x, y)) return .refresh;
         return .none;
     }
     if (y < s.top + header_height + head_height) {
@@ -498,6 +511,7 @@ pub fn targetRect(s: State, u: *ui.Ui, t: Target) ?ui.Rect {
         .space => |i| spaceRect(s, i),
         .show_grid => layoutRect(s, .grid),
         .show_list => layoutRect(s, .list),
+        .refresh => refreshRect(s),
         .new_site => newSiteRect(s, u),
         // Clipped to the content: the item may be half scrolled out.
         .item, .item_menu => |i| clipTo(itemRect(s, i), contentRect(s)),
@@ -758,6 +772,15 @@ fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
         .color = t.text,
     });
 
+    // Refresh: an icon button of its own.
+    const refresh = refreshRect(s);
+    const refresh_hovered = same(s.hover, Target.refresh);
+    try u.box(refresh, .{
+        .fill = if (refresh_hovered) t.hover else t.bg,
+        .border = t.input,
+        .radius = 8,
+    });
+    try u.icon(centred(refresh, 16), icons.sync, if (refresh_hovered) t.text else t.text2);
     // Grid or list: two halves of one bordered button.
     const g = layoutRect(s, .grid);
     try u.box(.{

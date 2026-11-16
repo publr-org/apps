@@ -1022,6 +1022,7 @@ fn clickHome(t: home.Target, m: native.event.Mouse) void {
         .settings => openSettings(),
         .show_grid => layout = .grid,
         .show_list => layout = .list,
+        .refresh => refreshAll(),
         .item => |i| {
             const r = item_refs.items[i];
             if (m.button == .right) {
@@ -2385,6 +2386,14 @@ fn startClone(pt: *ProjectTab) void {
     startRemote(.clone, pt.live, "");
 }
 
+/// Home's refresh, Command-R where Studio draws: the sites on this Mac and the Cloud projects
+/// read again (a project made on Cloud since shows).
+fn refreshAll() void {
+    refreshSites();
+    if (cloud.token != null) cloud.refresh();
+    redrawAll();
+}
+
 /// The site list read again, and every open tab told what changed in it.
 fn refreshSites() void {
     sites.refresh();
@@ -2459,14 +2468,16 @@ const SignIn = struct {
 
 fn onMenu(_: ?*anyopaque, tag: u32) void {
     switch (tag) {
-        Tag.reload => if (active) |i| tabs.items[i].web.reload(),
+        // A page in a web view loads again; anything Studio draws (Home, an Overview) reads
+        // the sites and the Cloud projects again.
+        Tag.reload => {
+            if (active) |i| if (webShown(tabs.items[i])) return tabs.items[i].web.reload();
+            refreshAll();
+        },
         Tag.open_in_browser => if (active) |i| openInBrowser(tabs.items[i]),
         Tag.home => showHome(),
         Tag.close_tab => if (active) |i| closeTab(i) else window.close(),
-        Tag.refresh_sites => {
-            refreshSites();
-            redrawAll();
-        },
+        Tag.refresh_sites => refreshAll(),
         Tag.settings => openSettings(),
         else => if (tag >= Tag.tab and tag < Tag.tab + 9) showTab(tag - Tag.tab),
     }
