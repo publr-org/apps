@@ -1201,6 +1201,14 @@ fn siteOf(pt: *const ProjectTab) []const u8 {
 fn onNewWindow(_: ?*anyopaque, _: *native.WebView, url: []const u8) bool {
     const host = hostOnly(url);
     if (host.len == 0) return false;
+    if (openInProjectTab(url, host)) return true;
+    // A deploy links its folder before its page's last seconds, while Studio still waits
+    // for the command to finish: the site list read again knows the project's admin.
+    refreshSites();
+    return openInProjectTab(url, host);
+}
+
+fn openInProjectTab(url: []const u8, host: []const u8) bool {
     for (tabs.items, 0..) |t, i| {
         const pt = t.project orelse continue;
         const cloud_admin = if (t.url) |admin| std.mem.eql(u8, hostOnly(admin), host) else false;
