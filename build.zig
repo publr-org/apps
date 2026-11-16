@@ -9,13 +9,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     // The `publr` command's core (sites, servers, releases, sign-on), and the command itself,
-    // which Studio carries beside its executable: the helper and sync run it.
+    // which Desktop carries beside its executable: the helper and sync run it.
     const cli = b.dependency("publr_cli", .{
         .target = target,
         .optimize = optimize,
     });
     const exe = b.addExecutable(.{
-        .name = "publr-studio-app",
+        .name = "publr-desktop-app",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -50,15 +50,15 @@ pub fn build(b: *std.Build) void {
         }),
     });
     b.installArtifact(exe);
-    // Beside Studio in zig-out/bin too, so `zig build run` finds it as the app does.
+    // Beside Desktop in zig-out/bin too, so `zig build run` finds it as the app does.
     b.installArtifact(cli.artifact("publr"));
-    const app = native_build.addAppBundle(b, exe, "Publr Studio", "app.publr.studio", .{
+    const app = native_build.addAppBundle(b, exe, "Publr Desktop", "app.publr.desktop", .{
         .icon = b.path("assets/AppIcon.icns"),
     });
     const bundled = b.addInstallArtifact(cli.artifact("publr"), .{
         .dest_dir = .{
             .override = .{
-                .custom = "Publr Studio.app/Contents/MacOS",
+                .custom = "Publr Desktop.app/Contents/MacOS",
             },
         },
     });
@@ -89,5 +89,5 @@ pub fn build(b: *std.Build) void {
 
     const run = b.addRunArtifact(exe);
     run.addPassthruArgs();
-    b.step("run", "Open Publr Studio").dependOn(&run.step);
+    b.step("run", "Open Publr Desktop").dependOn(&run.step);
 }

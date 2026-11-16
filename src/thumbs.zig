@@ -1,5 +1,5 @@
-//! Site thumbnails: Studio loads each running site's home page out of sight, in a web view
-//! behind Home, and keeps a picture of it, saved as a PNG beside Studio's other state so
+//! Site thumbnails: Desktop loads each running site's home page out of sight, in a web view
+//! behind Home, and keeps a picture of it, saved as a PNG beside Desktop's other state so
 //! the next start shows it at once. One site at a time; taken again at every start.
 
 const std = @import("std");
@@ -13,10 +13,10 @@ const page_height = 960;
 const picture_width = 640;
 
 /// Sent by the page once it has loaded and painted.
-const ready_message = "studio:thumb-ready";
+const ready_message = "desktop:thumb-ready";
 const ready_script =
     \\addEventListener('load', () => requestAnimationFrame(() => setTimeout(() => {
-    \\  webkit.messageHandlers.native.postMessage('studio:thumb-ready');
+    \\  webkit.messageHandlers.native.postMessage('desktop:thumb-ready');
     \\}, 400)));
 ;
 

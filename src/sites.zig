@@ -1,5 +1,5 @@
 //! The sites on this Mac, through the `publr` command's core (`publr_cli`): every listed
-//! folder's sites, their servers, signed-in links to their admins, new sites. Studio and the
+//! folder's sites, their servers, signed-in links to their admins, new sites. Desktop and the
 //! command read the same folders and config, so a site made by either is in both lists.
 
 const std = @import("std");
@@ -29,7 +29,7 @@ pub const Sites = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
     env: *const std.process.Environ.Map,
-    /// The `publr` command Studio runs: beside its executable, `$STUDIO_PUBLR`, or on the
+    /// The `publr` command Desktop runs: beside its executable, `$DESKTOP_PUBLR`, or on the
     /// PATH (started from the Finder there is no shell PATH, so the bundled one comes first).
     command_path: []const u8,
     list: std.ArrayList(Site) = .empty,
@@ -44,13 +44,13 @@ pub const Sites = struct {
         defer arena.deinit();
         const a = arena.allocator();
         var config = core.Config.load(self.io, a, self.env) catch |e| {
-            std.debug.print("studio: the command's config: {t}\n", .{e});
+            std.debug.print("desktop: the command's config: {t}\n", .{e});
             return;
         };
         if (self.folder.len > 0) self.gpa.free(self.folder);
         self.folder = self.gpa.dupe(u8, config.folder) catch "";
         const found = core.Sites.find(&config) catch |e| {
-            std.debug.print("studio: listing sites: {t}\n", .{e});
+            std.debug.print("desktop: listing sites: {t}\n", .{e});
             return;
         };
         for (found.all) |s| {
@@ -83,7 +83,7 @@ pub const Sites = struct {
     }
 
     /// The folder's Cloud link, if it was deployed (`cloud.json`, as `publr deploy` and
-    /// Studio write it), else the site it was cloned from (`.publr/clone.json`).
+    /// Desktop write it), else the site it was cloned from (`.publr/clone.json`).
     fn readLink(self: *Sites, a: std.mem.Allocator, site: *Site) void {
         const path = std.fs.path.join(a, &.{ site.folder, "cloud.json" }) catch return;
         const bytes = std.Io.Dir.cwd().readFileAlloc(self.io, path, a, .limited(64 * 1024)) catch {
@@ -149,7 +149,7 @@ pub const Sites = struct {
     /// Opens the site's admin at `path` in the person's browser, signed in there.
     pub fn openInBrowser(self: *Sites, name: []const u8, path: []const u8) void {
         const link = self.signInLink(name, path) catch |e| {
-            std.debug.print("studio: signing in to {s}: {t}\n", .{ name, e });
+            std.debug.print("desktop: signing in to {s}: {t}\n", .{ name, e });
             return;
         };
         defer self.gpa.free(link);
@@ -163,7 +163,7 @@ pub const Sites = struct {
 
     /// Makes a site in the default folder, set up and started, on the newest Publr
     /// (fetched when this Mac has none yet); false when it failed.
-    /// `admin` is its first admin, signed in from Studio; empty leaves it to the setup page.
+    /// `admin` is its first admin, signed in from Desktop; empty leaves it to the setup page.
     pub fn make(self: *Sites, name: []const u8, admin: []const u8) bool {
         var arena: std.heap.ArenaAllocator = .init(self.gpa);
         defer arena.deinit();
@@ -171,7 +171,7 @@ pub const Sites = struct {
         _ = core.project.new(&config, name, self.command_path, .{
             .admin = admin,
         }) catch |e| {
-            std.debug.print("studio: new site {s}: {t}\n", .{ name, e });
+            std.debug.print("desktop: new site {s}: {t}\n", .{ name, e });
             return false;
         };
         return true;
@@ -201,9 +201,9 @@ pub const Sites = struct {
         const config = core.Config.load(self.io, arena.allocator(), self.env) catch return;
         var site = locate(&config, name) catch return;
         const publr = core.versions.binary_for(&config, site) catch |e| {
-            return std.debug.print("studio: {s}'s Publr: {t}\n", .{ name, e });
+            return std.debug.print("desktop: {s}'s Publr: {t}\n", .{ name, e });
         };
-        core.server.start(&config, &site, publr) catch |e| std.debug.print("studio: starting {s}: {t}\n", .{ name, e });
+        core.server.start(&config, &site, publr) catch |e| std.debug.print("desktop: starting {s}: {t}\n", .{ name, e });
         core.helper.ensure(&config, self.command_path) catch {};
     }
 
@@ -212,7 +212,7 @@ pub const Sites = struct {
         defer arena.deinit();
         const config = core.Config.load(self.io, arena.allocator(), self.env) catch return;
         var site = locate(&config, name) catch return;
-        core.server.stop(&config, &site) catch |e| std.debug.print("studio: stopping {s}: {t}\n", .{ name, e });
+        core.server.stop(&config, &site) catch |e| std.debug.print("desktop: stopping {s}: {t}\n", .{ name, e });
     }
 
     /// The Publr `name` runs (or every site, when `name` is null) set to the binary at `path`;
@@ -254,7 +254,7 @@ pub const Sites = struct {
         const cwd = std.Io.Dir.cwd();
         cwd.createDirPath(self.io, trash) catch return;
         cwd.rename(site.folder, cwd, std.fs.path.join(a, &.{ trash, kept }) catch return, self.io) catch |e| {
-            return std.debug.print("studio: removing {s}: {t}\n", .{ name, e });
+            return std.debug.print("desktop: removing {s}: {t}\n", .{ name, e });
         };
         if (std.mem.eql(u8, site.entry, site.folder) and (config.remove(site.folder) catch false)) config.save() catch {};
     }
@@ -273,8 +273,8 @@ fn locate(config: *const core.Config, name: []const u8) !core.Site {
     return error.NoSuchSite;
 }
 
-/// The `publr` command for Studio to run: beside its own executable (inside the app,
-/// `Contents/MacOS/publr`), `$STUDIO_PUBLR`, or the first on the PATH.
+/// The `publr` command for Desktop to run: beside its own executable (inside the app,
+/// `Contents/MacOS/publr`), `$DESKTOP_PUBLR`, or the first on the PATH.
 pub fn commandPath(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map) []const u8 {
     const cwd = std.Io.Dir.cwd();
     if (std.process.executableDirPathAlloc(io, gpa)) |dir| {
@@ -284,7 +284,7 @@ pub fn commandPath(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.E
             if (cwd.access(io, beside, .{})) |_| return beside else |_| gpa.free(beside);
         }
     } else |_| {}
-    if (env.get("STUDIO_PUBLR")) |given| return given;
+    if (env.get("DESKTOP_PUBLR")) |given| return given;
     return onPath(gpa, io, env) orelse "publr";
 }
 

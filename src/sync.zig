@@ -128,7 +128,7 @@ const Job = struct {
     /// What the command said, once it failed (`reasonOf`).
     why: []u8 = &.{},
     fn run(job: *Job) void {
-        job.exec() catch |e| std.debug.print("studio: sync {s} {t}: {t}\n", .{ job.name, job.command, e });
+        job.exec() catch |e| std.debug.print("desktop: sync {s} {t}: {t}\n", .{ job.name, job.command, e });
         native.runOnMain(job, finish);
     }
 
@@ -159,7 +159,7 @@ const Job = struct {
         job.out = result.stdout;
         job.exit = if (result.term == .exited) result.term.exited else 255;
         if (job.exit != 0) {
-            std.debug.print("studio: publr {t} in {s}: {s}\n", .{ job.command, job.name, result.stderr });
+            std.debug.print("desktop: publr {t} in {s}: {s}\n", .{ job.command, job.name, result.stderr });
             job.why = try a.dupe(u8, reasonOf(result.stderr));
         }
         // Stopped for the pull, running again after it, whatever it did.
@@ -193,7 +193,7 @@ const Shared = struct {
     gpa: std.mem.Allocator = undefined,
     io: std.Io = undefined,
     env: *const std.process.Environ.Map = undefined,
-    /// The `publr` command Studio carries.
+    /// The `publr` command Desktop carries.
     publr: []const u8 = "",
     /// Asks Cloud for a sign-on token for a project's slug; answers through `signedOn`.
     sign_on: *const fn (slug: []const u8) void = undefined,
@@ -234,7 +234,7 @@ pub fn reviewOf(name: []const u8) ?[]const u8 {
     return e.review;
 }
 
-/// Where the folder `name` is; null for a folder Studio has not asked about.
+/// Where the folder `name` is; null for a folder Desktop has not asked about.
 pub fn stateOf(name: []const u8) ?State {
     const e = shared.entries.get(name) orelse return null;
     return e.state;

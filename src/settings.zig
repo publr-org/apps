@@ -1,6 +1,6 @@
 //! Settings: a page of Home's, beside its sidebar, set as Home's pages are (the bar with where
 //! you are, the page's title, then its sections). Where new sites go (the default folder),
-//! the other folders whose sites Studio and `publr ls` show, the `publr` command in Terminal
+//! the other folders whose sites Desktop and `publr ls` show, the `publr` command in Terminal
 //! (Install `publr` in PATH, as editors put their command there), and, folded under Advanced,
 //! the Publr build every project runs instead of its own version (one built from source).
 //! The same config the command reads (`publr config`). Layout and hit testing together.
@@ -28,11 +28,11 @@ const button_text: ui.TextStyle = .{
 
 /// What Terminal's `publr` is.
 pub const Command = union(enum) {
-    /// Studio's, linked from `/usr/local/bin/publr`.
+    /// Desktop's, linked from `/usr/local/bin/publr`.
     installed,
-    /// Another one answers on the PATH (Homebrew's, say); Studio leaves it.
+    /// Another one answers on the PATH (Homebrew's, say); Desktop leaves it.
     other: []const u8,
-    /// None: Install puts Studio's there.
+    /// None: Install puts Desktop's there.
     missing,
 };
 

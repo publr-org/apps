@@ -1,5 +1,5 @@
-//! Publr Cloud from Studio: signing in to the person's account (OAuth with PKCE in the
-//! browser, back to Studio through a one-off listener on 127.0.0.1), the account token in
+//! Publr Cloud from Desktop: signing in to the person's account (OAuth with PKCE in the
+//! browser, back to Desktop through a one-off listener on 127.0.0.1), the account token in
 //! the keychain, and the spaces and projects it lists. Network work runs off the main
 //! thread; what it finds is handed back on the main thread (`changed`).
 //! The calls are Cloud's (`cloud/docs/projects.md`, "Apps signed in to an account").
@@ -7,8 +7,9 @@
 const std = @import("std");
 const native = @import("native");
 
+// The first-party client id Publr Cloud signs this app in as.
 const client_id = "publr-studio";
-const keychain_service = "app.publr.studio";
+const keychain_service = "app.publr.desktop";
 
 pub const Project = struct {
     name: []const u8,
@@ -43,7 +44,7 @@ pub const Status = enum {
 pub const Cloud = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
-    /// The dashboard's address (`https://cloud.publr.app`, `$STUDIO_CLOUD` to change it).
+    /// The dashboard's address (`https://cloud.publr.app`, `$DESKTOP_CLOUD` to change it).
     base: []const u8,
     status: Status = .signed_out,
     token: ?[]u8 = null,
@@ -90,7 +91,7 @@ pub const Cloud = struct {
         t.detach();
     }
 
-    /// Opens Cloud's sign-in in the browser; Studio is signed in when the person allows it.
+    /// Opens Cloud's sign-in in the browser; Desktop is signed in when the person allows it.
     pub fn signIn(self: *Cloud) void {
         if (self.busy) return;
         self.busy = true;
@@ -433,7 +434,7 @@ const Job = struct {
             .ignore_unknown_fields = true,
             .allocate = .alloc_always,
         }) catch {
-            self.problem = "Publr Cloud answered something Studio does not understand.";
+            self.problem = "Publr Cloud answered something Desktop does not understand.";
             arena.deinit();
             return;
         };
@@ -530,7 +531,7 @@ fn authorize(c: *Cloud) ![]u8 {
         challenge,
         state,
     }, 0);
-    if (c.no_browser) std.debug.print("studio: sign in at {s}\n", .{url}) else native.openInBrowser(url);
+    if (c.no_browser) std.debug.print("desktop: sign in at {s}\n", .{url}) else native.openInBrowser(url);
 
     // The browser comes back once: the code, or the person's no.
     const code = try waitForCode(io, a, &listener, state);
@@ -558,7 +559,7 @@ fn authorize(c: *Cloud) ![]u8 {
 }
 
 const back_page =
-    \\<!doctype html><meta charset=utf-8><title>Publr Studio</title>
+    \\<!doctype html><meta charset=utf-8><title>Publr Desktop</title>
     \\<body style="margin:0;height:100vh;display:grid;place-items:center;font:15px -apple-system,system-ui,sans-serif;color:#222">
     \\<div style="text-align:center"><p style="font-size:18px;font-weight:600;margin:0 0 8px">{s}</p><p style="margin:0;color:#777">{s}</p></div>
 ;
@@ -596,9 +597,9 @@ fn waitForCode(io: std.Io, a: std.mem.Allocator, listener: *std.Io.net.Server, s
         }
         const ok = code != null and std.mem.eql(u8, got_state, state);
         const body = try std.fmt.allocPrint(a, back_page, if (ok)
-            .{ "Signed in to Publr Studio", "You can close this tab and go back to Studio." }
+            .{ "Signed in to Publr Desktop", "You can close this tab and go back to Desktop." }
         else
-            .{ "Sign-in cancelled", "Studio is still signed out. You can close this tab." });
+            .{ "Sign-in cancelled", "Desktop is still signed out. You can close this tab." });
         try writer.interface.print("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}", .{ body.len, body });
         try writer.interface.flush();
         if (denied or !ok) return error.Denied;

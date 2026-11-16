@@ -1,5 +1,5 @@
-//! Publr Studio: one window, a tab per open site. The bar and Home (every site, laid out
-//! as PublrDesign's file browser) are drawn by Studio itself with the native `ui`; each
+//! Publr Desktop: one window, a tab per open site. The bar and Home (every site, laid out
+//! as PublrDesign's file browser) are drawn by Desktop itself with the native `ui`; each
 //! tab is the site's admin, signed in, in the system's web view. Local sites, their
 //! servers and the signed-in links come from the `publr` command's core (`publr_cli`), the
 //! same folders the command lists (`.agents/specs/publr-cli.md`).
@@ -24,7 +24,7 @@ const deploying = @import("deploy.zig");
 
 const Io = std.Io;
 
-const app_name = "Publr Studio";
+const app_name = "Publr Desktop";
 
 /// App menu tags.
 const Tag = struct {
@@ -202,7 +202,7 @@ var items: std.ArrayList(home.Item) = .empty;
 var item_refs: std.ArrayList(Ref) = .empty;
 
 var self_test = false;
-/// `STUDIO_TIMING=<site>`: opens the site, walks `timing_pages`, prints how long each
+/// `DESKTOP_TIMING=<site>`: opens the site, walks `timing_pages`, prints how long each
 /// took in the web view and how long drawing Home takes; then quits.
 var timing_site: ?[]const u8 = null;
 var timing_step: usize = 0;
@@ -230,22 +230,22 @@ pub fn main(init: std.process.Init) !void {
     home_dir = env.get("HOME") orelse return error.NoHome;
     env_map = env;
     self_test = env.get("SELF_TEST") != null;
-    timing_site = env.get("STUDIO_TIMING");
+    timing_site = env.get("DESKTOP_TIMING");
     sites = .{
         .gpa = gpa,
         .io = io,
         .env = env,
         .command_path = sites_module.commandPath(gpa, io, env),
     };
-    support_dir = try std.fs.path.join(gpa, &.{ home_dir, "Library/Application Support/Publr Studio" });
+    support_dir = try std.fs.path.join(gpa, &.{ home_dir, "Library/Application Support/Publr Desktop" });
     Io.Dir.cwd().createDirPath(io, support_dir) catch {};
 
     native.init(app_name);
     native.onMenu(null, onMenu);
     buildMenus();
     theme = themeFor(native.appearance());
-    // `STUDIO_THEME=light|dark`: one look whatever the system says (for screenshots).
-    const forced = env.get("STUDIO_THEME");
+    // `DESKTOP_THEME=light|dark`: one look whatever the system says (for screenshots).
+    const forced = env.get("DESKTOP_THEME");
     if (forced) |f| theme = if (std.mem.eql(u8, f, "dark")) &themes.dark else &themes.light;
     theme_forced = forced != null;
 
@@ -254,8 +254,8 @@ pub fn main(init: std.process.Init) !void {
     name_field = .init(gpa);
     address_field = .init(gpa);
     admin_field = .init(gpa);
-    cloud = .init(gpa, io, env.get("STUDIO_CLOUD") orelse "https://cloud.publr.app", cloudChanged);
-    cloud.no_browser = env.get("STUDIO_NO_BROWSER") != null;
+    cloud = .init(gpa, io, env.get("DESKTOP_CLOUD") orelse "https://cloud.publr.app", cloudChanged);
+    cloud.no_browser = env.get("DESKTOP_NO_BROWSER") != null;
     cloud.refresh();
     syncing.init(.{
         .gpa = gpa,
@@ -299,15 +299,15 @@ pub fn main(init: std.process.Init) !void {
         native.run();
         return;
     }
-    if (env.get("STUDIO_VIEW")) |v| if (std.mem.eql(u8, v, "list")) {
+    if (env.get("DESKTOP_VIEW")) |v| if (std.mem.eql(u8, v, "list")) {
         layout = .list;
     };
-    // The sites open last time, in their tabs; Home when there were none. `STUDIO_HOME`:
+    // The sites open last time, in their tabs; Home when there were none. `DESKTOP_HOME`:
     // Home alone, the saved tabs left as they are (for screenshots).
-    if (env.get("STUDIO_HOME") == null) reopenSites();
+    if (env.get("DESKTOP_HOME") == null) reopenSites();
     if (tabs.items.len == 0) showHome();
-    // `STUDIO_OPEN=new-site[:text]`: the sheet open with that typed (for screenshots).
-    if (env.get("STUDIO_OPEN")) |o| {
+    // `DESKTOP_OPEN=new-site[:text]`: the sheet open with that typed (for screenshots).
+    if (env.get("DESKTOP_OPEN")) |o| {
         const arg = if (std.mem.indexOfScalar(u8, o, ':')) |c| o[c + 1 ..] else "";
         if (std.mem.startsWith(u8, o, "new-site")) {
             openNewSite();
@@ -333,35 +333,35 @@ pub fn main(init: std.process.Init) !void {
             };
         }
     }
-    // `STUDIO_VIEW=settings[-advanced]`: Home on its Settings page (for screenshots).
-    if (env.get("STUDIO_VIEW")) |v| if (std.mem.startsWith(u8, v, "settings")) {
+    // `DESKTOP_VIEW=settings[-advanced]`: Home on its Settings page (for screenshots).
+    if (env.get("DESKTOP_VIEW")) |v| if (std.mem.startsWith(u8, v, "settings")) {
         if (active == null) showHome();
         openSettings();
         settings_advanced = std.mem.endsWith(u8, v, "-advanced");
     };
-    // `--open <folder>` (`publr studio <name>`): that site's tab.
+    // `--open <folder>` (`publr desktop <name>`): that site's tab.
     if (openArg(init)) |folder| if (sites.atFolder(folder)) |s| openLocal(s.name);
-    // `STUDIO_OPEN_LIVE=<address>`: a project elsewhere opened, as a Cloud project is (tests).
-    if (env.get("STUDIO_OPEN_LIVE")) |live| {
+    // `DESKTOP_OPEN_LIVE=<address>`: a project elsewhere opened, as a Cloud project is (tests).
+    if (env.get("DESKTOP_OPEN_LIVE")) |live| {
         openProjectTab(hostOf(live), "", live, "");
-        // `STUDIO_VIEW=clone`: its Clone to this Mac pressed.
-        if (env.get("STUDIO_VIEW")) |v| if (std.mem.eql(u8, v, "clone")) {
+        // `DESKTOP_VIEW=clone`: its Clone to this Mac pressed.
+        if (env.get("DESKTOP_VIEW")) |v| if (std.mem.eql(u8, v, "clone")) {
             if (active) |i| if (tabs.items[i].project) |pt| startClone(pt);
         };
     }
-    // `STUDIO_VIEW=project-advanced`: the opened project's Advanced unfolded (screenshots).
-    if (env.get("STUDIO_VIEW")) |v| if (std.mem.eql(u8, v, "project-advanced")) {
+    // `DESKTOP_VIEW=project-advanced`: the opened project's Advanced unfolded (screenshots).
+    if (env.get("DESKTOP_VIEW")) |v| if (std.mem.eql(u8, v, "project-advanced")) {
         if (active) |i| if (tabs.items[i].project) |pt| {
             pt.advanced = true;
             pt.scroll = project.maxScroll(projectPage(i));
         };
     };
-    if (env.get("STUDIO_SIGN_IN") != null and cloud.status == .signed_out) cloud.signIn();
-    if (self_test) std.debug.print("studio: window {d}, {d} sites, {d} tabs\n", .{ window.number(), sites.list.items.len, tabs.items.len });
+    if (env.get("DESKTOP_SIGN_IN") != null and cloud.status == .signed_out) cloud.signIn();
+    if (self_test) std.debug.print("desktop: window {d}, {d} sites, {d} tabs\n", .{ window.number(), sites.list.items.len, tabs.items.len });
     native.run();
 }
 
-/// The folder after `--open` among Studio's arguments, or null.
+/// The folder after `--open` among Desktop's arguments, or null.
 fn openArg(init: std.process.Init) ?[]const u8 {
     const args = init.minimal.args.toSlice(init.arena.allocator()) catch return null;
     for (args, 0..) |arg, i| {
@@ -424,7 +424,7 @@ fn buildMenus() void {
     native.setMenu("Tabs", &tab_items);
 }
 
-// What is drawn: the bar's and Home's states, made from Studio's.
+// What is drawn: the bar's and Home's states, made from Desktop's.
 
 fn barState(titles: *[64][]const u8) bar.State {
     const n = @min(tabs.items.len, titles.len);
@@ -549,7 +549,7 @@ fn addLocal(a: std.mem.Allocator, name: []const u8) void {
     }) catch {};
 }
 
-/// Site names kept for as long as Studio runs: what a card or an open menu holds stays
+/// Site names kept for as long as Desktop runs: what a card or an open menu holds stays
 /// valid when the site list is read again (which frees the list's own copies).
 var interned: std.StringHashMapUnmanaged(void) = .empty;
 
@@ -673,7 +673,7 @@ fn cloudThumbNames() []const []const u8 {
 
 /// The Cloud listing changed (signed in or out, listed again).
 fn cloudChanged() void {
-    if (cloud.problem) |pr| std.debug.print("studio: cloud: {s}\n", .{pr});
+    if (cloud.problem) |pr| std.debug.print("desktop: cloud: {s}\n", .{pr});
     thumbs.loadSaved(cloudThumbNames());
     // Pictures of the live sites; previews are private.
     for (cloud.spaces) |sp| for (sp.projects) |p| if (!p.preview) {
@@ -815,7 +815,7 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
     const s = sites.find(name) orelse return &.{};
     if (s.live.len > 0) {
         // Linked: the Cloud project is the site; this folder is its working copy, kept in
-        // step by Studio. Work made here goes up when the person sends it.
+        // step by Desktop. Work made here goes up when the person sends it.
         const state = syncing.stateOf(name) orelse .checking;
         const linked = [_]home.MenuItem{
             .{
@@ -911,7 +911,7 @@ fn onEvent(_: ?*anyopaque, win: *native.Window, event: native.Event) void {
             if (deploy_job != null) {
                 dirty = true;
                 const st = deploy_progress.get();
-                if (auto_deploy and last_stage != st) std.debug.print("studio: deploy {t} {s}\n", .{ st, deployBusyText() });
+                if (auto_deploy and last_stage != st) std.debug.print("desktop: deploy {t} {s}\n", .{ st, deployBusyText() });
                 last_stage = st;
             }
             if (dirty) draw();
@@ -1224,7 +1224,7 @@ fn onNewWindow(_: ?*anyopaque, _: *native.WebView, url: []const u8) bool {
     const host = hostOnly(url);
     if (host.len == 0) return false;
     if (openInProjectTab(url, host)) return true;
-    // A deploy links its folder before its page's last seconds, while Studio still waits
+    // A deploy links its folder before its page's last seconds, while Desktop still waits
     // for the command to finish: the site list read again knows the project's admin.
     refreshSites();
     return openInProjectTab(url, host);
@@ -1370,7 +1370,7 @@ fn signedOn(signed: @import("cloud.zig").SignedOn) void {
         const host = hostOf(url);
         const at = std.mem.indexOf(u8, host, "--admin") orelse continue;
         if (!std.mem.eql(u8, host[0..at], signed.slug)) continue;
-        if (signed.problem) |pr| std.debug.print("studio: signing in to {s}: {s}\n", .{ signed.slug, pr });
+        if (signed.problem) |pr| std.debug.print("desktop: signing in to {s}: {s}\n", .{ signed.slug, pr });
         const admin = frame_arena.allocator().dupeSentinel(u8, url, 0) catch return;
         t.web.loadUrl(if (signed.problem == null) withReturn(signed.url) else admin);
         return;
@@ -1485,18 +1485,18 @@ fn draw() void {
     if (active != null) _ = frame_arena.reset(.retain_capacity);
     u.begin();
     var titles: [64][]const u8 = undefined;
-    if (active == null) home.draw(u, homeState(), theme) catch |e| return std.debug.print("studio: home: {}\n", .{e});
-    if (active) |i| if (tabs.items[i].project != null) project.draw(u, projectPage(i), theme) catch |e| return std.debug.print("studio: project: {}\n", .{e});
-    bar.draw(u, barState(&titles), theme) catch |e| return std.debug.print("studio: bar: {}\n", .{e});
-    if (active == null and view == .settings) settings.draw(u, settingsState(), theme) catch |e| return std.debug.print("studio: settings: {}\n", .{e});
+    if (active == null) home.draw(u, homeState(), theme) catch |e| return std.debug.print("desktop: home: {}\n", .{e});
+    if (active) |i| if (tabs.items[i].project != null) project.draw(u, projectPage(i), theme) catch |e| return std.debug.print("desktop: project: {}\n", .{e});
+    bar.draw(u, barState(&titles), theme) catch |e| return std.debug.print("desktop: bar: {}\n", .{e});
+    if (active == null and view == .settings) settings.draw(u, settingsState(), theme) catch |e| return std.debug.print("desktop: settings: {}\n", .{e});
     if (open_sheet != null) {
         var fields: [1]sheet.Field = undefined;
-        sheet.draw(u, sheetState(&fields), theme, 0, window) catch |e| return std.debug.print("studio: sheet: {}\n", .{e});
+        sheet.draw(u, sheetState(&fields), theme, 0, window) catch |e| return std.debug.print("desktop: sheet: {}\n", .{e});
     }
     surface.configure(w, h);
     const frame = surface.acquire() orelse return;
     // True while text or layers are still arriving: the next refreshes finish the frame.
-    const again = u.draw(frame.view, w, h, @floatCast(scale), theme.bg) catch |e| return std.debug.print("studio: draw: {}\n", .{e});
+    const again = u.draw(frame.view, w, h, @floatCast(scale), theme.bg) catch |e| return std.debug.print("desktop: draw: {}\n", .{e});
     surface.present(frame);
     dirty = again;
     if (timing_site != null) std.debug.print("  draw: {d} us\n", .{@divTrunc(t0.untilNow(io, .awake).nanoseconds, 1000)});
@@ -1802,7 +1802,7 @@ fn addressAnswered(slug: []const u8, answer: @import("cloud.zig").Availability) 
     // An answer about what the field said before is no answer.
     if (!std.mem.eql(u8, slug, address_field.value())) return;
     availability = answer;
-    if (auto_deploy) std.debug.print("studio: address {s}: {t}\n", .{ slug, answer });
+    if (auto_deploy) std.debug.print("desktop: address {s}: {t}\n", .{ slug, answer });
     if (auto_deploy and answer == .available) startDeploy();
     redrawAll();
 }
@@ -1885,7 +1885,7 @@ fn startDeploy() void {
         .shown = deployPageShown,
     };
     const a = job.arena.allocator();
-    // `publr deploy` in the site's folder: the command Studio carries.
+    // `publr deploy` in the site's folder: the command Desktop carries.
     job.publr = sites.command_path;
     job.site_dir = a.dupe(u8, sites.folderOf(deploy_site)) catch return;
     if (job.site_dir.len == 0) return;
@@ -1943,7 +1943,7 @@ fn deployFinished(job: *deploying.Job) void {
         deploy_job = null;
     }
     sheet_busy = null;
-    if (auto_deploy) std.debug.print("studio: deploy finished: {s}{s}\n", .{ job.problem orelse "live at ", if (job.problem == null) job.address else "" });
+    if (auto_deploy) std.debug.print("desktop: deploy finished: {s}{s}\n", .{ job.problem orelse "live at ", if (job.problem == null) job.address else "" });
     // Its page showed how it ended: the card becomes the linked project, nothing more to say.
     if (job.page.len > 0) {
         refreshSites();
@@ -2491,7 +2491,7 @@ fn startClone(pt: *ProjectTab) void {
     startRemote(.clone, pt.live, "");
 }
 
-/// Home's refresh, Command-R where Studio draws: the sites on this Mac and the Cloud projects
+/// Home's refresh, Command-R where Desktop draws: the sites on this Mac and the Cloud projects
 /// read again (a project made on Cloud since shows).
 fn refreshAll() void {
     refreshSites();
@@ -2506,7 +2506,7 @@ fn refreshSites() void {
 }
 
 /// Each open project's tab as the site list now has it: a folder that went to Cloud (by
-/// Studio or by `publr deploy`) carries its live address, a link taken away leaves it, and a
+/// Desktop or by `publr deploy`) carries its live address, a link taken away leaves it, and a
 /// Cloud project that came to this Mac gets its folder.
 fn syncTabs() void {
     for (tabs.items) |*t| {
@@ -2554,7 +2554,7 @@ const SignIn = struct {
 
     fn run(self: *SignIn) void {
         self.link = sites.signInLink(self.name, self.path) catch |e| blk: {
-            std.debug.print("studio: signing in to {s} failed: {}\n", .{ self.name, e });
+            std.debug.print("desktop: signing in to {s} failed: {}\n", .{ self.name, e });
             break :blk null;
         };
         native.runOnMain(self, load);
@@ -2573,7 +2573,7 @@ const SignIn = struct {
 
 fn onMenu(_: ?*anyopaque, tag: u32) void {
     switch (tag) {
-        // A page in a web view loads again; anything Studio draws (Home, an Overview) reads
+        // A page in a web view loads again; anything Desktop draws (Home, an Overview) reads
         // the sites and the Cloud projects again.
         Tag.reload => {
             if (active) |i| if (webShown(tabs.items[i])) return tabs.items[i].web.reload();
@@ -2615,13 +2615,13 @@ fn openInBrowser(t: Tab) void {
 /// A Cloud project's page in the browser, signed in there by the one-time sign-on.
 fn browserSignedOn(signed: @import("cloud.zig").SignedOn) void {
     if (signed.problem) |pr| {
-        std.debug.print("studio: signing in to {s} for the browser: {s}\n", .{ signed.slug, pr });
+        std.debug.print("desktop: signing in to {s} for the browser: {s}\n", .{ signed.slug, pr });
         return;
     }
     native.openInBrowser(withReturn(signed.url));
 }
 
-// What Studio keeps between starts.
+// What Desktop keeps between starts.
 
 fn statePath(buf: []u8, name: []const u8) []const u8 {
     return std.fmt.bufPrint(buf, "{s}/{s}", .{ support_dir, name }) catch "";
@@ -2735,7 +2735,7 @@ fn loadSettings() void {
     const a = settings_arena.allocator();
     const config = core.Config.load(io, a, env_map) catch |e| {
         settings_problem = "The settings could not be read.";
-        return std.debug.print("studio: settings: {t}\n", .{e});
+        return std.debug.print("desktop: settings: {t}\n", .{e});
     };
     settings_folder = shortFolder(a, config.folder);
     settings_folders = config.folders;
@@ -2747,7 +2747,7 @@ fn loadSettings() void {
     settings_command = commandState(a);
 }
 
-/// Whether Terminal's `publr` is Studio's, another, or none.
+/// Whether Terminal's `publr` is Desktop's, another, or none.
 fn commandState(a: std.mem.Allocator) settings.Command {
     var buf: [1024]u8 = undefined;
     if (Io.Dir.cwd().readLink(io, command_link, &buf)) |n| {
@@ -2820,7 +2820,7 @@ fn changeConfig(change: *const fn (*core.Config) anyerror!void) void {
     };
     change(&config) catch |e| {
         settings_problem = switch (e) {
-            error.TooManyFolders => "That is as many folders as Studio lists.",
+            error.TooManyFolders => "That is as many folders as Desktop lists.",
             else => "The settings could not be saved.",
         };
         return redrawAll();
@@ -2946,7 +2946,7 @@ const ChoosePublr = struct {
         }
         sites.choosePublr(job.name, path) catch |e| {
             job.failed = true;
-            std.debug.print("studio: choosing the Publr: {t}\n", .{e});
+            std.debug.print("desktop: choosing the Publr: {t}\n", .{e});
         };
     }
 
@@ -2986,7 +2986,7 @@ fn choosePublr(name: ?[]const u8, clear: bool) void {
     thread.detach();
 }
 
-/// `/usr/local/bin/publr` made a link to the command inside Studio: directly when the folder
+/// `/usr/local/bin/publr` made a link to the command inside Desktop: directly when the folder
 /// lets this user write, else through the system's administrator prompt.
 const Install = struct {
     ok: bool = false,
@@ -3027,9 +3027,9 @@ const Install = struct {
 
 fn installCommand() void {
     if (settings_busy != null or settings_command != .missing) return;
-    // `STUDIO_NO_INSTALL`: the button is pressed without touching /usr/local/bin (tests).
-    if (env_map.get("STUDIO_NO_INSTALL") != null) {
-        std.debug.print("studio: would link {s} to {s}\n", .{ command_link, sites.command_path });
+    // `DESKTOP_NO_INSTALL`: the button is pressed without touching /usr/local/bin (tests).
+    if (env_map.get("DESKTOP_NO_INSTALL") != null) {
+        std.debug.print("desktop: would link {s} to {s}\n", .{ command_link, sites.command_path });
         return;
     }
     const job = gpa.create(Install) catch return;

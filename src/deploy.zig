@@ -1,5 +1,5 @@
 //! Deploying a local site to Publr Cloud, off the main thread: `publr deploy`, the command
-//! Studio carries, run in the site's folder. It exports the site with its own Publr, uploads
+//! Desktop carries, run in the site's folder. It exports the site with its own Publr, uploads
 //! it in parts, makes the project at the chosen address and links the folder (`cloud.json`);
 //! its `--progress json` lines say how far it is.
 
@@ -29,7 +29,7 @@ pub const Job = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
     env: *const std.process.Environ.Map,
-    /// The `publr` command Studio carries.
+    /// The `publr` command Desktop carries.
     publr: []const u8,
     site_dir: []const u8,
     base: []const u8,
@@ -59,7 +59,7 @@ pub const Job = struct {
     fn run(self: *Job) void {
         self.steps() catch |e| {
             if (self.problem == null) self.problem = switch (e) {
-                error.OutOfMemory => "Studio ran out of memory.",
+                error.OutOfMemory => "Desktop ran out of memory.",
                 else => "Publr Cloud could not be reached.",
             };
         };
@@ -77,7 +77,7 @@ pub const Job = struct {
         self.shown(self);
     }
 
-    /// `publr deploy` in the site's folder, the command Studio carries: it exports the site
+    /// `publr deploy` in the site's folder, the command Desktop carries: it exports the site
     /// with the site's own Publr, uploads it in parts, makes the project and links the
     /// folder (`cloud.json`). Its `--progress json` lines drive the sheet.
     fn steps(self: *Job) !void {
@@ -150,7 +150,7 @@ pub const Job = struct {
         const said = err_reader.interface.allocRemaining(a, .limited(1 << 16)) catch "";
         const term = try child.wait(self.io);
         if (term == .exited and term.exited == 0 and self.address.len > 0) return;
-        if (said.len > 0) std.debug.print("studio: publr deploy: {s}\n", .{said});
+        if (said.len > 0) std.debug.print("desktop: publr deploy: {s}\n", .{said});
         if (failed) |f| {
             const known = problemFor(f.@"error");
             self.problem = if (known.len > 0) known else if (f.message.len > 0) f.message else "Publr Cloud did not make the project.";
@@ -257,7 +257,7 @@ test "a deploy follows the command's events: progress, then the project" {
     try std.testing.expectEqual(Stage.done, job.progress.get());
 }
 
-test "a refused deploy says why, in Studio's words when Cloud named the reason" {
+test "a refused deploy says why, in Desktop's words when Cloud named the reason" {
     const job, var arena = try tryDeploy(
         \\{"stage":"packing"}
         \\{"stage":"failed","error":"Conflict","message":"taken"}

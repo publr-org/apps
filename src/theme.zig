@@ -1,5 +1,5 @@
-//! Studio's colours: Publr's admin palette (`publr/ui/styles/base.css`, near-black and
-//! cool greys, no brand colour), so Studio feels like the CMS it opens. Dark is the same
+//! Desktop's colours: Publr's admin palette (`publr/ui/styles/base.css`, near-black and
+//! cool greys, no brand colour), so Desktop feels like the CMS it opens. Dark is the same
 //! greys turned over, for a Mac set to dark.
 
 const ui = @import("ui");
