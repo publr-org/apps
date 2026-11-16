@@ -1202,19 +1202,31 @@ fn siteOf(pt: *const ProjectTab) []const u8 {
 fn onNewWindow(_: ?*anyopaque, _: *native.WebView, url: []const u8) bool {
     const host = hostOnly(url);
     if (host.len == 0) return false;
-    if (openInProjectTab(host)) return true;
+    if (openInProjectTab(url, host)) return true;
     // A deploy links its folder before its page's last seconds, while Studio still waits
     // for the command to finish: the site list read again knows the project's admin.
     refreshSites();
-    return openInProjectTab(host);
+    return openInProjectTab(url, host);
 }
 
-/// The project whose admin `host` is, its admin opened in its tab and signed in afresh: a
-/// page's own sign-on link is for one use and may be spent (or stale) by now.
-fn openInProjectTab(host: []const u8) bool {
+/// The project whose admin `host` is, opened in its tab: an admin page signed in afresh (a
+/// page's own sign-on link is for one use and may be spent or stale by now); anything else
+/// on the admin's host (its "View site", `/`) as it is, which takes it on to the site with
+/// the person signed in there.
+fn openInProjectTab(url: []const u8, host: []const u8) bool {
+    const rest = url[std.mem.indexOf(u8, url, host).? + host.len ..];
+    const admin_page = std.mem.startsWith(u8, rest, "/admin") or std.mem.startsWith(u8, rest, "/auth/");
     for (tabs.items, 0..) |t, i| {
         const pt = t.project orelse continue;
         const cloud_admin = if (t.url) |admin| std.mem.eql(u8, hostOnly(admin), host) else false;
+        if (!cloud_admin and !isLocalAdmin(pt, host)) continue;
+        if (!admin_page) {
+            pt.page = .site;
+            showTab(i);
+            loadIn(t, url);
+            redrawAll();
+            return true;
+        }
         if (cloud_admin) {
             pt.signed = false;
             adminAt(i, "/admin", null);
