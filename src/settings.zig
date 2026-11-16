@@ -239,7 +239,7 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = s.top + header_height + 60,
         .w = c.w,
         .h = 20,
-    }, s.problem orelse s.busy orelse "Where projects live on this Mac, and who new sites belong to.", .{
+    }, s.problem orelse s.busy orelse "Where projects live on this Mac, and who new projects belong to.", .{
         .size = 14,
         .color = if (s.problem != null) t.danger else t.text2,
     });
