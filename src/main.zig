@@ -2314,6 +2314,13 @@ const RemoteJob = struct {
                     pt.note = "";
                     refreshSites();
                     becameLocal(pt);
+                    // A project on Cloud and on this Mac shows Cloud's copy: on into its admin
+                    // there, past the page's own way into the copy here.
+                    for (tabs.items, 0..) |t, i| if (t.project == pt) {
+                        pt.signed = false;
+                        adminAt(i, "/admin", null);
+                        break;
+                    };
                 }
             },
         }
