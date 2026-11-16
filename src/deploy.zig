@@ -175,7 +175,6 @@ fn problemFor(code: []const u8) []const u8 {
         .{ "NotASite", "Publr Cloud could not read the packed site." },
         .{ "NewerSite", "This site was made by a newer Publr than Publr Cloud runs." },
         .{ "Unverified", "Verify your email address first (Publr Cloud sent you a link)." },
-        .{ "TooMany", "You made many projects today. Try again tomorrow." },
         .{ "Unavailable", "Publr Cloud cannot start sites right now. Try again in a moment." },
     };
     for (table) |t| if (std.mem.eql(u8, code, t[0])) return t[1];
