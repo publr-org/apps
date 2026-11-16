@@ -252,6 +252,7 @@ pub fn main(init: std.process.Init) !void {
     window = try native.Window.create(.{
         .on_event = onEvent,
         .on_message = onMessage,
+        .on_new_window = onNewWindow,
     }, .{
         .title = app_name,
         .titlebar = .custom,
@@ -1182,8 +1183,8 @@ fn goTo(i: usize, page: project.Page) void {
     switch (page) {
         .overview => {},
         .admin => adminAt(i, "/admin", null),
-        .site => loadIn(t, siteOf(pt)),
-        .app => |k| if (k < pt.apps.len) loadIn(t, pt.apps[k].address),
+        .site => sitePageAt(i, siteOf(pt)),
+        .app => |k| if (k < pt.apps.len) sitePageAt(i, pt.apps[k].address),
     }
     showTab(i);
 }
@@ -1195,9 +1196,71 @@ fn siteOf(pt: *const ProjectTab) []const u8 {
     return s.address;
 }
 
+/// A page asks for a new window: a project's admin (a deploy's "Open admin", signed in once)
+/// opens in that project's tab, as its Admin does; anything else goes to the browser.
+fn onNewWindow(_: ?*anyopaque, _: *native.WebView, url: []const u8) bool {
+    const host = hostOnly(url);
+    if (host.len == 0) return false;
+    for (tabs.items, 0..) |t, i| {
+        const pt = t.project orelse continue;
+        const cloud_admin = if (t.url) |admin| std.mem.eql(u8, hostOnly(admin), host) else false;
+        if (!cloud_admin and !isLocalAdmin(pt, host)) continue;
+        pt.page = .admin;
+        if (cloud_admin) pt.signed = true;
+        showTab(i);
+        loadIn(t, url);
+        redrawAll();
+        return true;
+    }
+    return false;
+}
+
+/// The host and port of an address, without its path or query.
+fn hostOnly(url: []const u8) []const u8 {
+    const rest = if (std.mem.indexOf(u8, url, "://")) |at| url[at + 3 ..] else return "";
+    return rest[0 .. std.mem.indexOfAny(u8, rest, "/?#") orelse rest.len];
+}
+
+/// Whether `host` is the admin of the tab's site on this Mac (`admin.localhost:<port>`).
+fn isLocalAdmin(pt: *const ProjectTab, host: []const u8) bool {
+    if (pt.folder.len == 0) return false;
+    const s = sites.find(pt.folder) orelse return false;
+    const own = hostOnly(s.address);
+    const port = own[(std.mem.lastIndexOfScalar(u8, own, ':') orelse return false)..];
+    return std.mem.startsWith(u8, host, "admin.localhost") and std.mem.eql(u8, host["admin.localhost".len..], port);
+}
+
 fn loadIn(t: Tab, address: []const u8) void {
     if (address.len == 0) return;
     t.web.loadUrl(frame_arena.allocator().dupeSentinel(u8, address, 0) catch return);
+}
+
+/// A page of the project's site in its tab, through a sign-in that lands there: Publr then
+/// shows its toolbar, the way to the admin and back. A page on a host other than the site's
+/// own is loaded as it is.
+fn sitePageAt(i: usize, address: []const u8) void {
+    const t = tabs.items[i];
+    const pt = t.project orelse return;
+    const own = if (pt.live.len > 0) pt.live else if (sites.find(pt.folder)) |s| s.address else "";
+    if (address.len == 0 or own.len == 0 or !std.mem.eql(u8, hostOnly(address), hostOnly(own))) return loadIn(t, address);
+    const rest = address[std.mem.indexOf(u8, address, "://").? + 3 ..];
+    const path = if (std.mem.indexOfScalar(u8, rest, '/')) |at| rest[at..] else "/";
+    if (pt.live.len == 0) {
+        const job = gpa.create(SignIn) catch return;
+        job.* = .{
+            .name = t.name,
+            .web = t.web,
+            .path = gpa.dupe(u8, path) catch return gpa.destroy(job),
+            .owns_path = true,
+        };
+        const thread = std.Thread.spawn(.{}, SignIn.run, .{job}) catch return;
+        return thread.detach();
+    }
+    // Cloud: a one-time sign-on each time, landing on the page.
+    if (cloud.token == null) return loadIn(t, address);
+    if (sign_on_return) |old| gpa.free(old);
+    sign_on_return = gpa.dupe(u8, path) catch null;
+    cloud.signOnTo(syncing.slugOf(pt.live), signedOn);
 }
 
 /// The project's admin in its tab at `path`: Cloud's signed in through a one-time sign-on
@@ -2311,7 +2374,7 @@ fn refreshSites() void {
 /// Studio or by `publr deploy`) carries its live address, a link taken away leaves it, and a
 /// Cloud project that came to this Mac gets its folder.
 fn syncTabs() void {
-    for (tabs.items) |t| {
+    for (tabs.items) |*t| {
         const pt = t.project orelse continue;
         if (pt.folder.len == 0) {
             if (pt.live.len > 0) becameLocal(pt);
@@ -2321,6 +2384,9 @@ fn syncTabs() void {
         if (std.mem.eql(u8, s.live, pt.live)) continue;
         const a = pt.arena.allocator();
         pt.live = a.dupe(u8, s.live) catch continue;
+        if (t.url) |old| gpa.free(old);
+        t.url = if (pt.live.len > 0) adminOf(pt.live) else null;
+        pt.signed = false;
         var db: [512]u8 = undefined;
         const base = if (pt.live.len > 0) pt.live else s.address;
         pt.apps = project.readApps(io, a, siteDir(&db, pt.folder), base);
@@ -2345,8 +2411,10 @@ fn becameLocal(pt: *ProjectTab) void {
 const SignIn = struct {
     name: []const u8,
     web: *native.WebView,
-    /// The admin's page it opens on.
+    /// The page it opens on: the admin's, or the site's.
     path: []const u8 = "/admin",
+    /// `path` is the job's own copy, freed with it.
+    owns_path: bool = false,
     link: ?[:0]u8 = null,
 
     fn run(self: *SignIn) void {
@@ -2360,6 +2428,7 @@ const SignIn = struct {
     fn load(ctx: ?*anyopaque) callconv(.c) void {
         const self: *SignIn = @ptrCast(@alignCast(ctx));
         defer gpa.destroy(self);
+        defer if (self.owns_path) gpa.free(self.path);
         const link = self.link orelse return;
         defer gpa.free(link);
         // The tab may have closed while the server started.
