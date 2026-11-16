@@ -132,8 +132,8 @@ pub const BundleOptions = struct {
 };
 
 /// A macOS `.app` around `exe`, installed to `zig-out/<name>.app`: Info.plist, the
-/// executable and, when given, the icon. `name` is the name people see ("Publr Studio") and the bundle's folder name;
-/// `id` is the reverse-DNS identifier ("app.publr.studio"). Signing and notarising come
+/// executable and, when given, the icon. `name` is the name people see ("Publr Desktop") and the bundle's folder name;
+/// `id` is the reverse-DNS identifier ("app.publr.desktop"). Signing and notarising come
 /// later, with releases.
 pub fn addAppBundle(
     b: *std.Build,

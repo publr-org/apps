@@ -46,7 +46,7 @@ fn home(u: *Ui, scroll: f32, hover: ?usize, options: HomeOptions) !void {
         .y = 0,
         .w = 200,
         .h = 38,
-    }, "Publr Studio", .{
+    }, "Publr Desktop", .{
         .size = 13,
         .weight = 500,
     });

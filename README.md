@@ -1,6 +1,6 @@
 # native
 
-Native apps in Zig, with no web view in what the app draws itself. Used by Publr Studio and
+Native apps in Zig, with no web view in what the app draws itself. Used by Publr Desktop and
 the PublrDesign app. macOS first; Windows and Linux follow the same API.
 
 ```
