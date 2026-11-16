@@ -49,6 +49,9 @@ pub const Handler = struct {
     on_event: *const fn (ctx: ?*anyopaque, window: *Window, event: Event) void,
     /// Messages a web view's page posts (`webkit.messageHandlers.native.postMessage(text)`).
     on_message: ?*const fn (ctx: ?*anyopaque, web: *WebView, text: []const u8) void = null,
+    /// A page of `web` asks for `url` in a new window: true when the app took it; otherwise
+    /// it opens in the person's browser.
+    on_new_window: ?*const fn (ctx: ?*anyopaque, web: *WebView, url: []const u8) bool = null,
 };
 
 pub const Window = struct {
@@ -1254,11 +1257,22 @@ fn onMenuItem(_: id, _: SEL, sender: id) callconv(.c) void {
     handler(menu_ctx, @intCast(tag));
 }
 
-/// A page asks for a new window (a link with `target="_blank"`, `window.open`): it opens in
-/// the person's browser, as a desktop app's links do; no second web view.
-fn onNewWindow(_: id, _: SEL, _: id, _: id, action: id, _: id) callconv(.c) id {
+/// A page asks for a new window (a link with `target="_blank"`, `window.open`): the app may
+/// take the address (`Handler.on_new_window`, say into a tab of its own); otherwise it opens
+/// in the person's browser, as a desktop app's links do. Never a second web view here.
+fn onNewWindow(_: id, _: SEL, wk: id, _: id, action: id, _: id) callconv(.c) id {
     const nsurl = objc.msg(objc.msg(action, "request"), "URL");
-    if (nsurl != null) _ = objc.msgId(objc.msg(objc.class("NSWorkspace"), "sharedWorkspace"), "openURL:", nsurl);
+    if (nsurl == null) return null;
+    const absolute = objc.msg(nsurl, "absoluteString");
+    if (absolute != null) {
+        const utf8: [*:0]const u8 = @ptrCast(objc.msg(absolute, "UTF8String"));
+        const url = std.mem.span(utf8);
+        for (windows.items) |w| for (w.webs.items) |web| if (web.wk == wk) {
+            const take = w.handler.on_new_window orelse break;
+            if (take(w.handler.ctx, web, url)) return null;
+        };
+    }
+    _ = objc.msgId(objc.msg(objc.class("NSWorkspace"), "sharedWorkspace"), "openURL:", nsurl);
     return null;
 }
 
