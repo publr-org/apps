@@ -2506,15 +2506,35 @@ fn onMenu(_: ?*anyopaque, tag: u32) void {
 
 /// The page the tab shows, in the browser, signed in there too (the tab's session is its
 /// own).
+/// The same page, on the same copy: a project on Cloud signs in there through a one-time
+/// sign-on landing on it; a site on this Mac through the command's link. A page of the
+/// admin stays the admin's, a page of the site the site's (the sign-on takes it on there).
 fn openInBrowser(t: Tab) void {
     const address = t.web.address();
-    var path: []const u8 = "/admin";
+    var path: []const u8 = "/";
     if (std.mem.indexOf(u8, address, "://")) |scheme| {
         if (std.mem.indexOfScalarPos(u8, address, scheme + 3, '/')) |slash| path = address[slash..];
     }
     // A sign-on link is for one use: the admin itself instead.
-    if (!std.mem.startsWith(u8, path, "/admin")) path = "/admin";
-    sites.openInBrowser(t.name, path);
+    if (std.mem.startsWith(u8, path, "/auth/")) path = "/admin";
+    const pt = t.project orelse return sites.openInBrowser(t.name, path);
+    if (pt.live.len == 0) return sites.openInBrowser(if (pt.folder.len > 0) pt.folder else t.name, path);
+    if (cloud.token == null) {
+        var buf: [2048]u8 = undefined;
+        return native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{address}, 0) catch return);
+    }
+    if (sign_on_return) |old| gpa.free(old);
+    sign_on_return = gpa.dupe(u8, path) catch null;
+    cloud.signOnTo(syncing.slugOf(pt.live), browserSignedOn);
+}
+
+/// A Cloud project's page in the browser, signed in there by the one-time sign-on.
+fn browserSignedOn(signed: @import("cloud.zig").SignedOn) void {
+    if (signed.problem) |pr| {
+        std.debug.print("studio: signing in to {s} for the browser: {s}\n", .{ signed.slug, pr });
+        return;
+    }
+    native.openInBrowser(withReturn(signed.url));
 }
 
 // What Studio keeps between starts.
