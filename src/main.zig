@@ -1585,13 +1585,11 @@ fn adminState(fields: *[2]sheet.Field) sheet.State {
         } else if (problem) |pr| .{
             .text = pr,
             .kind = .bad,
-        } else .{
-            .text = if (cloud.status == .signed_in) "Empty: your Cloud account." else "Empty: each site's setup page makes it.",
-        },
+        } else null,
     };
     return .{
-        .title = "Admin for new sites",
-        .description = "Every new project on this Mac gets this admin, signed in from Studio.",
+        .title = "Default account email",
+        .description = "",
         .fields = fields[0..1],
         .primary = "Save",
         .primary_enabled = problem == null,
@@ -1642,19 +1640,9 @@ fn defaultAdmin() []const u8 {
 
 fn adminProblem(email: []const u8) ?[]const u8 {
     if (email.len == 0) return null;
-    const at = std.mem.indexOfScalar(u8, email, '@') orelse return "An email address.";
-    if (at == 0 or at == email.len - 1 or std.mem.indexOfAny(u8, email, " \t") != null) return "An email address.";
+    const at = std.mem.indexOfScalar(u8, email, '@') orelse return "Not an email address.";
+    if (at == 0 or at == email.len - 1 or std.mem.indexOfAny(u8, email, " \t") != null) return "Not an email address.";
     return null;
-}
-
-/// What happens with the admin typed for a new site.
-fn adminNote(email: []const u8) []const u8 {
-    if (email.len == 0) return "None: the site's setup page makes it.";
-    const saved = saved_admin;
-    if (saved.len == 0 and cloud.status == .signed_in and std.mem.eql(u8, email, cloud.account_email)) return "Your Cloud account, signed in from Studio.";
-    if (saved.len == 0) return "Signed in from Studio, and kept for new sites.";
-    if (std.mem.eql(u8, email, saved)) return "Signed in from Studio. Change it for new sites in Settings.";
-    return "Signed in from Studio, for this site.";
 }
 
 fn sheetState(fields: *[2]sheet.Field) sheet.State {
@@ -1692,15 +1680,13 @@ fn localState(fields: *[2]sheet.Field) sheet.State {
     };
     const admin_problem = adminProblem(admin_field.value());
     fields[1] = .{
-        .label = "Admin",
+        .label = "Account email",
         .field = &admin_field,
         .placeholder = "you@example.com",
         .note = if (admin_problem) |pr| .{
             .text = pr,
             .kind = .bad,
-        } else .{
-            .text = adminNote(admin_field.value()),
-        },
+        } else null,
     };
     return .{
         .title = "New project",
@@ -2823,9 +2809,9 @@ fn commandState(a: std.mem.Allocator) settings.Command {
 fn settingsAdmin() []const u8 {
     if (settings_admin.len > 0) return settings_admin;
     if (cloud.status == .signed_in and cloud.account_email.len > 0) {
-        return std.fmt.allocPrint(frame_arena.allocator(), "Your Cloud account ({s})", .{cloud.account_email}) catch "Your Cloud account";
+        return cloud.account_email;
     }
-    return "None: each site's setup page makes it";
+    return "Not set";
 }
 
 fn settingsState() settings.State {

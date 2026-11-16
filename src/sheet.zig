@@ -13,6 +13,12 @@ const field_height: f32 = 36;
 const button_height: f32 = 36;
 /// The title (20), the line under it (40) and the room around them.
 const head: f32 = 20 + 8 + 40 + 12;
+/// The title alone, for a sheet with no line under it.
+const head_bare: f32 = 20 + 16;
+
+fn headHeight(s: State) f32 {
+    return if (s.description.len > 0) head else head_bare;
+}
 /// A field's label (22), the field and its note (26).
 const field_step: f32 = 22 + field_height + 26;
 /// A choice's label (22), its buttons and the room under them.
@@ -76,7 +82,7 @@ fn choiceHeight(s: State) f32 {
 }
 
 fn panel(s: State) ui.Rect {
-    var h: f32 = pad + head + choiceHeight(s);
+    var h: f32 = pad + headHeight(s) + choiceHeight(s);
     h += @as(f32, @floatFromInt(s.fields.len)) * field_step;
     h += 12 + button_height + pad;
     return .{
@@ -91,7 +97,7 @@ fn fieldRect(s: State, i: usize) ui.Rect {
     const p = panel(s);
     return .{
         .x = p.x + pad,
-        .y = p.y + pad + head + choiceHeight(s) + @as(f32, @floatFromInt(i)) * field_step + 22,
+        .y = p.y + pad + headHeight(s) + choiceHeight(s) + @as(f32, @floatFromInt(i)) * field_step + 22,
         .w = p.w - 2 * pad,
         .h = field_height,
     };
@@ -103,7 +109,7 @@ fn optionRect(s: State, i: usize) ui.Rect {
     const w = (p.w - 2 * pad) / n;
     return .{
         .x = p.x + pad + w * @as(f32, @floatFromInt(i)),
-        .y = p.y + pad + head + 22,
+        .y = p.y + pad + headHeight(s) + 22,
         .w = w,
         .h = field_height,
     };

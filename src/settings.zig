@@ -117,7 +117,7 @@ fn newSitesTitle(s: State, u: *ui.Ui) f32 {
 }
 
 fn adminRow(s: State, u: *ui.Ui) ui.Rect {
-    return row(s, newSitesTitle(s, u) + title_step + 18, 0);
+    return row(s, newSitesTitle(s, u) + title_step, 0);
 }
 
 fn adminChangeRect(s: State, u: *ui.Ui) ui.Rect {
@@ -286,8 +286,7 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
     try button(u, t, addRect(s, u), add_label, same(s.hover, .add_folder), true);
 
     // New sites.
-    try sectionTitle(u, t, c, newSitesTitle(s, u), "New sites");
-    try smallLabel(u, t, c, adminRow(s, u).y - 18, "Admin");
+    try sectionTitle(u, t, c, newSitesTitle(s, u), "Default account email");
     try pathRow(u, t, adminRow(s, u), s.admin);
     try button(u, t, adminChangeRect(s, u), change_label, same(s.hover, .change_admin), true);
 
