@@ -87,8 +87,7 @@ pub const Cloud = struct {
             .cloud = self,
             .token = self.gpa.dupe(u8, token) catch return,
         };
-        const t = std.Thread.spawn(.{}, Job.list, .{job}) catch return;
-        t.detach();
+        native.spawn(Job.list, .{job}) catch return;
     }
 
     /// Opens Cloud's sign-in in the browser; Desktop is signed in when the person allows it.
@@ -101,8 +100,7 @@ pub const Cloud = struct {
         job.* = .{
             .cloud = self,
         };
-        const t = std.Thread.spawn(.{}, Job.signIn, .{job}) catch return;
-        t.detach();
+        native.spawn(Job.signIn, .{job}) catch return;
     }
 
     /// Forgets the token here and signs it out on Cloud (listed under the account's apps).
@@ -156,8 +154,7 @@ pub const Cloud = struct {
             .token = self.gpa.dupe(u8, token) catch return,
             .done = done,
         };
-        const t = std.Thread.spawn(.{}, Check.run, .{job}) catch return;
-        t.detach();
+        native.spawn(Check.run, .{job}) catch return;
     }
 
     /// Makes a project named `name` in `space`, with the starter page, as the dashboard's
@@ -174,8 +171,7 @@ pub const Cloud = struct {
             .token = self.gpa.dupe(u8, token) catch return,
             .done = done,
         };
-        const t = std.Thread.spawn(.{}, Create.run, .{job}) catch return;
-        t.detach();
+        native.spawn(Create.run, .{job}) catch return;
     }
 
     /// Signs in to the project `slug` as the member, as the dashboard's `/sign-on` does: `done`
@@ -192,8 +188,7 @@ pub const Cloud = struct {
             .token = self.gpa.dupe(u8, token) catch return,
             .done = done,
         };
-        const t = std.Thread.spawn(.{}, SignOn.run, .{job}) catch return;
-        t.detach();
+        native.spawn(SignOn.run, .{job}) catch return;
     }
 
     /// The dashboard page for the account's own settings (apps signed in, sign out).

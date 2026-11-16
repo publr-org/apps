@@ -90,4 +90,71 @@ pub fn build(b: *std.Build) void {
     const run = b.addRunArtifact(exe);
     run.addPassthruArgs();
     b.step("run", "Open Publr Desktop").dependOn(&run.step);
+
+    add_web(b, optimize);
+}
+
+/// `zig build web`: Desktop for a browser page (wasm32-wasi), `zig-out/web/publr-desktop.wasm`,
+/// run by publr.app's guide (`.agents/specs/publr-desktop-web.md`).
+fn add_web(b: *std.Build, optimize: std.builtin.Optimize) void {
+    const target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .wasi,
+    });
+    const native = b.dependency("native", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const cli = b.dependency("publr_cli", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const wasm = b.addExecutable(.{
+        .name = "publr-desktop",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{
+                    .name = "native",
+                    .module = native.module("native"),
+                },
+                .{
+                    .name = "ui",
+                    .module = native.module("ui"),
+                },
+                .{
+                    .name = "publr_engine",
+                    .module = native.builder.dependency("publr_engine", .{
+                        .target = target,
+                        .optimize = optimize,
+                    }).module("publr_engine"),
+                },
+                .{
+                    .name = "publr_icons",
+                    .module = b.dependency("publr_icons", .{}).module("publr_icons"),
+                },
+                .{
+                    .name = "publr_cli",
+                    .module = cli.module("publr_cli"),
+                },
+            },
+        }),
+    });
+    // The page calls the backend's `desktop_*` functions.
+    wasm.rdynamic = true;
+    const install = b.addInstallArtifact(wasm, .{
+        .dest_dir = .{
+            .override = .{
+                .custom = "web",
+            },
+        },
+    });
+    const web = b.step("web", "Publr Desktop for a browser page");
+    web.dependOn(&install.step);
+    // Beside it, what the page runs it with: the backend's page half and Publr's WASI files.
+    web.dependOn(&b.addInstallFile(native.path("src/web/desktop.js"), "web/desktop.js").step);
+    web.dependOn(&b.addInstallFile(b.path("../publr/browser/publr-files.js"), "web/publr-files.js").step);
 }

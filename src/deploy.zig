@@ -17,8 +17,9 @@ pub const Stage = enum(u8) {
 /// What the sheet shows while it runs (written by the job, read each frame).
 pub const Progress = struct {
     stage: std.atomic.Value(u8) = .init(@backingInt(Stage.packing)),
-    sent: std.atomic.Value(u64) = .init(0),
-    total: std.atomic.Value(u64) = .init(0),
+    /// Bytes: `usize`, which a 32-bit target (the web build) can still load atomically.
+    sent: std.atomic.Value(usize) = .init(0),
+    total: std.atomic.Value(usize) = .init(0),
 
     pub fn get(p: *const Progress) Stage {
         return @fromBackingInt(@intCast(p.stage.load(.acquire)));
@@ -52,8 +53,7 @@ pub const Job = struct {
     shown: *const fn (job: *Job) void,
 
     pub fn start(self: *Job) !void {
-        const t = try std.Thread.spawn(.{}, run, .{self});
-        t.detach();
+        try native.spawn(run, .{self});
     }
 
     fn run(self: *Job) void {
@@ -131,8 +131,8 @@ pub const Job = struct {
             const stage = std.meta.stringToEnum(Stage, event.stage) orelse continue;
             switch (stage) {
                 .uploading => {
-                    self.progress.total.store(event.total, .release);
-                    self.progress.sent.store(event.done, .release);
+                    self.progress.total.store(@intCast(event.total), .release);
+                    self.progress.sent.store(@intCast(event.done), .release);
                 },
                 .done => {
                     self.address = event.address;
@@ -253,7 +253,7 @@ test "a deploy follows the command's events: progress, then the project" {
     try std.testing.expect(job.problem == null);
     try std.testing.expectEqualStrings("https://x.publr.app", job.address);
     try std.testing.expectEqualStrings("q", job.project_id);
-    try std.testing.expectEqual(@as(u64, 10), job.progress.total.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 10), job.progress.total.load(.acquire));
     try std.testing.expectEqual(Stage.done, job.progress.get());
 }
 

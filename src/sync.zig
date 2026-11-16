@@ -313,11 +313,10 @@ fn start(name: []const u8, command: Command, stop_first: bool, token: []const u8
         .stop_first = stop_first,
     };
     e.busy = true;
-    const t = std.Thread.spawn(.{}, Job.run, .{job}) catch {
+    native.spawn(Job.run, .{job}) catch {
         e.busy = false;
         return;
     };
-    t.detach();
 }
 
 const Where = struct {
@@ -331,7 +330,7 @@ const Where = struct {
 /// After a failure, Home drawn again once `recheck_ms` passed, which asks again: a failure
 /// is tried again even while nobody touches the window.
 fn retryLater() void {
-    const t = std.Thread.spawn(.{}, struct {
+    native.spawn(struct {
         fn wait() void {
             std.Io.sleep(shared.io, .fromMilliseconds(recheck_ms + 1000), .awake) catch return;
             native.runOnMain(null, again);
@@ -340,7 +339,6 @@ fn retryLater() void {
             shared.changed();
         }
     }.wait, .{}) catch return;
-    t.detach();
 }
 
 /// What a job found, and what follows from it: on the main thread.

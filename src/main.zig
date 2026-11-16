@@ -1262,8 +1262,7 @@ fn openInProjectTab(url: []const u8, host: []const u8) bool {
             .name = t.name,
             .web = t.web,
         };
-        const thread = std.Thread.spawn(.{}, SignIn.run, .{job}) catch return true;
-        thread.detach();
+        native.spawn(SignIn.run, .{job}) catch return true;
         redrawAll();
         return true;
     }
@@ -1308,8 +1307,8 @@ fn sitePageAt(i: usize, address: []const u8) void {
             .path = gpa.dupe(u8, path) catch return gpa.destroy(job),
             .owns_path = true,
         };
-        const thread = std.Thread.spawn(.{}, SignIn.run, .{job}) catch return;
-        return thread.detach();
+        native.spawn(SignIn.run, .{job}) catch return;
+        return;
     }
     // Cloud: a one-time sign-on each time, landing on the page.
     if (cloud.token == null) return loadIn(t, address);
@@ -1332,8 +1331,8 @@ fn adminAt(i: usize, path: []const u8, direct: ?[]const u8) void {
             .web = t.web,
             .path = path,
         };
-        const thread = std.Thread.spawn(.{}, SignIn.run, .{job}) catch return;
-        return thread.detach();
+        native.spawn(SignIn.run, .{job}) catch return;
+        return;
     }
     const admin = t.url orelse return;
     // Signed out of Cloud: the admin's own sign-in.
@@ -1994,8 +1993,7 @@ fn createSite() void {
     };
     sheet_busy = "Making the site…";
     redrawAll();
-    const thread = std.Thread.spawn(.{}, NewSite.run, .{job}) catch return;
-    thread.detach();
+    native.spawn(NewSite.run, .{job}) catch return;
 }
 
 // New project.
@@ -2250,8 +2248,7 @@ fn openSite(name: []const u8) void {
         .name = owned,
         .web = web,
     };
-    const thread = std.Thread.spawn(.{}, SignIn.run, .{job}) catch return;
-    thread.detach();
+    native.spawn(SignIn.run, .{job}) catch return;
 }
 
 fn closeTab(i: usize) void {
@@ -2449,8 +2446,7 @@ fn startRemote(kind: RemoteKind, live: []const u8, sign_on: []const u8) void {
         .sign_on = gpa.dupe(u8, sign_on) catch return gpa.destroy(job),
         .arena = .init(gpa),
     };
-    const thread = std.Thread.spawn(.{}, RemoteJob.run, .{job}) catch return;
-    thread.detach();
+    native.spawn(RemoteJob.run, .{job}) catch return;
 }
 
 /// Cloud's sign-on token for a project a job waited on: the job again, signing in first.
@@ -2900,12 +2896,11 @@ fn chooseFolder(purpose: FolderFor) void {
     };
     settings_busy = "Choosing a folder…";
     redrawAll();
-    const thread = std.Thread.spawn(.{}, ChooseFolder.run, .{job}) catch {
+    native.spawn(ChooseFolder.run, .{job}) catch {
         settings_busy = null;
         gpa.destroy(job);
         return;
     };
-    thread.detach();
 }
 
 var removing: usize = 0;
@@ -2977,13 +2972,12 @@ fn choosePublr(name: ?[]const u8, clear: bool) void {
         settings_busy = if (clear) "Going back to each site's release…" else "Choosing a Publr…";
         redrawAll();
     }
-    const thread = std.Thread.spawn(.{}, ChoosePublr.run, .{job}) catch {
+    native.spawn(ChoosePublr.run, .{job}) catch {
         if (name == null) settings_busy = null;
         if (job.name) |n| gpa.free(n);
         gpa.destroy(job);
         return;
     };
-    thread.detach();
 }
 
 /// `/usr/local/bin/publr` made a link to the command inside Desktop: directly when the folder
@@ -3036,10 +3030,9 @@ fn installCommand() void {
     job.* = .{};
     settings_busy = "Installing publr…";
     redrawAll();
-    const thread = std.Thread.spawn(.{}, Install.run, .{job}) catch {
+    native.spawn(Install.run, .{job}) catch {
         settings_busy = null;
         gpa.destroy(job);
         return;
     };
-    thread.detach();
 }
