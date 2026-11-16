@@ -1495,7 +1495,7 @@ fn draw() void {
     bar.draw(u, barState(&titles), theme) catch |e| return std.debug.print("desktop: bar: {}\n", .{e});
     if (active == null and view == .settings) settings.draw(u, settingsState(), theme) catch |e| return std.debug.print("desktop: settings: {}\n", .{e});
     if (open_sheet == .welcome) {
-        welcome.draw(u, welcomeState(), theme) catch |e| return std.debug.print("desktop: welcome: {}\n", .{e});
+        welcome.draw(u, welcomeState(), theme, window) catch |e| return std.debug.print("desktop: welcome: {}\n", .{e});
     } else if (open_sheet != null) {
         var fields: [1]sheet.Field = undefined;
         sheet.draw(u, sheetState(&fields), theme, 0, window) catch |e| return std.debug.print("desktop: sheet: {}\n", .{e});
@@ -1588,8 +1588,8 @@ fn welcomeIfNew() void {
 }
 
 var welcome_hover: welcome.Target = .none;
-/// The email sheet was opened from the welcome: its second button skips it.
-var admin_from_welcome = false;
+var welcome_step: welcome.Step = .start;
+var welcome_choice: ?welcome.Choice = null;
 /// Where accounts are explained, for the welcome and the email sheet.
 const accounts_docs = "https://publr.app/docs/account";
 
@@ -1598,35 +1598,74 @@ fn welcomeState() welcome.State {
     return .{
         .window_width = @floatCast(size.w),
         .window_height = @floatCast(size.h),
+        .step = welcome_step,
+        .choice = welcome_choice,
+        .email = &admin_field,
+        .problem = adminProblem(admin_field.value()),
         .hover = welcome_hover,
     };
 }
 
 fn welcomeEvent(win: *native.Window, event: native.Event) void {
+    const typing = welcome_step == .email;
     switch (event) {
         .mouse_move => |m| {
             const h = welcome.hit(welcomeState(), u, m.x, m.y);
             if (h != welcome_hover) {
                 welcome_hover = h;
-                win.setCursor(if (h == .none) .arrow else .pointer);
+                win.setCursor(switch (h) {
+                    .none => .arrow,
+                    .field => .text,
+                    else => .pointer,
+                });
                 redrawAll();
             }
         },
         .mouse_down => |m| switch (welcome.hit(welcomeState(), u, m.x, m.y)) {
             .cloud => primaryAction(),
-            .local => {
-                admin_from_welcome = true;
-                openAdminSheet();
-            },
+            .local => showWelcomeStep(.without_cloud),
+            .back => showWelcomeStep(if (welcome_step == .email) .without_cloud else .start),
+            .by_hand => chooseWelcome(.by_hand),
+            .one_account => chooseWelcome(.one_account),
+            .confirm => nextWelcome(),
             .link => native.openInBrowser(accounts_docs),
-            .none => {},
+            .field, .none => {},
         },
         .text_command => |c| switch (c) {
-            .enter => primaryAction(),
-            .escape => closeSheet(),
-            else => {},
+            .enter => if (welcome_step == .start) primaryAction() else nextWelcome(),
+            .escape => switch (welcome_step) {
+                .start => closeSheet(),
+                .without_cloud => showWelcomeStep(.start),
+                .email => showWelcomeStep(.without_cloud),
+            },
+            else => if (typing and admin_field.handle(event)) redrawAll(),
         },
+        .text => if (typing and admin_field.handle(event)) redrawAll(),
         else => {},
+    }
+}
+
+fn showWelcomeStep(step: welcome.Step) void {
+    if (step == .start) welcome_choice = null;
+    welcome_step = step;
+    welcome_hover = .none;
+    window.setTextInput(step == .email);
+    redrawAll();
+}
+
+fn chooseWelcome(choice: welcome.Choice) void {
+    welcome_choice = choice;
+    redrawAll();
+}
+
+/// The step's main button. Without Cloud: by hand keeps nothing, so each project asks for its
+/// own account; one account asks its email next. The email: saved as the default account email.
+fn nextWelcome() void {
+    if (!welcome.ready(welcomeState())) return;
+    switch (welcome_step) {
+        .start => primaryAction(),
+        .without_cloud => if (welcome_choice == .one_account) showWelcomeStep(.email) else closeSheet(),
+        .email => if (sites.setDefaultAdmin(admin_field.value())) closeSheet(),
     }
 }
 
@@ -1664,7 +1703,6 @@ fn adminState(fields: *[1]sheet.Field) sheet.State {
         .fields = fields[0..1],
         .primary = "Save",
         .primary_enabled = problem == null,
-        .secondary = if (admin_from_welcome) "Skip" else "Cancel",
         .hover = sheet_hover,
         .window_width = @floatCast(size.w),
         .window_height = @floatCast(size.h),
@@ -1686,7 +1724,6 @@ fn closeSheet() void {
     open_sheet = null;
     sheet_hover = .none;
     welcome_hover = .none;
-    admin_from_welcome = false;
     window.setTextInput(false);
     redrawAll();
 }
