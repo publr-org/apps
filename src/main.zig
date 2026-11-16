@@ -696,6 +696,7 @@ fn cloudChanged() void {
         },
         else => {},
     }
+    if (open_sheet == .welcome and cloud.status == .signed_in) closeSheet();
     if (deploy_after_sign_in) |name| if (cloud.status != .signing_in) {
         deploy_after_sign_in = null;
         if (cloud.status == .signed_in) deploy(name);
@@ -1602,6 +1603,8 @@ fn welcomeState() welcome.State {
         .choice = welcome_choice,
         .email = &admin_field,
         .problem = adminProblem(admin_field.value()),
+        .signing_in = cloud.status == .signing_in,
+        .cloud_problem = if (cloud.status == .signed_out) cloud.problem else null,
         .hover = welcome_hover,
     };
 }
@@ -1855,9 +1858,11 @@ fn primaryAction() void {
     switch (open_sheet orelse return) {
         .new_project => if (new_where == .cloud and cloudOffered()) createProject() else createSite(),
         .admin => saveAdmin(),
-        .welcome => {
-            closeSheet();
+        // The welcome stays until the browser answers: signed in closes it, a no is said on it.
+        .welcome => if (cloud.status == .signed_out) {
             cloud.signIn();
+            welcome_hover = .none;
+            redrawAll();
         },
         .deploy => startDeploy(),
         .deployed => {

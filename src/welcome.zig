@@ -31,6 +31,10 @@ pub const State = struct {
     email: *ui.TextField,
     /// What is wrong with the email, or null.
     problem: ?[]const u8,
+    /// The browser is asking the person to allow Desktop on Publr Cloud.
+    signing_in: bool,
+    /// Why the last sign-in did not work ("denied"), or null.
+    cloud_problem: ?[]const u8,
     hover: Target,
 };
 
@@ -96,6 +100,8 @@ const width: f32 = 560;
 const panel_pad: f32 = 28;
 const button_height: f32 = 44;
 const benefit_step: f32 = 56;
+/// A sign-in that did not work, said above the Cloud button.
+const problem_step: f32 = 30;
 const tile_height: f32 = 196;
 const tile_gap: f32 = 12;
 const field_height: f32 = 40;
@@ -111,15 +117,16 @@ const button_text: ui.TextStyle = .{
     .weight = 500,
 };
 
-fn panelHeight() f32 {
+fn panelHeight(s: State) f32 {
     const rows: f32 = @floatFromInt(benefits.len);
-    return panel_pad + 20 + 10 + 40 + 20 + rows * benefit_step + 8 + button_height + panel_pad;
+    const problem: f32 = if (s.cloud_problem != null) problem_step else 0;
+    return panel_pad + 20 + 10 + 40 + 20 + rows * benefit_step + problem + 8 + button_height + panel_pad;
 }
 
 /// What the step shows under its head, down to its buttons.
 fn bodyHeight(s: State) f32 {
     return switch (s.step) {
-        .start => panelHeight() + 12 + button_height,
+        .start => panelHeight(s) + 12 + button_height,
         .without_cloud => tile_height + 24 + button_height,
         .email => 22 + field_height + 32 + button_height,
     };
@@ -142,7 +149,7 @@ fn panelRect(s: State) ui.Rect {
         .x = left(s),
         .y = bodyTop(s),
         .w = width,
-        .h = panelHeight(),
+        .h = panelHeight(s),
     };
 }
 
@@ -229,7 +236,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (linkRect(s, u).contains(x, y)) return .link;
     switch (s.step) {
         .start => {
-            if (cloudRect(s).contains(x, y)) return .cloud;
+            if (!s.signing_in and cloudRect(s).contains(x, y)) return .cloud;
             if (localRect(s).contains(x, y)) return .local;
             return .none;
         },
@@ -505,8 +512,19 @@ fn drawPanel(u: *ui.Ui, s: State, t: *const Theme) !void {
         try drawBenefit(u, t, b, x, y, inner);
         y += benefit_step;
     }
+    if (s.cloud_problem) |problem| try u.text(.{
+        .x = x,
+        .y = y,
+        .w = inner,
+        .h = 18,
+    }, problem, .{
+        .size = 13,
+        .weight = 500,
+        .color = t.danger,
+    });
 
-    try primary(u, t, cloudRect(s), "Continue with Publr Cloud", s.hover == .cloud, true);
+    const label = if (s.signing_in) "Waiting for your browser…" else "Continue with Publr Cloud";
+    try primary(u, t, cloudRect(s), label, s.hover == .cloud, !s.signing_in);
 }
 
 fn drawBenefit(u: *ui.Ui, t: *const Theme, b: Benefit, x: f32, y: f32, w: f32) !void {

@@ -439,7 +439,7 @@ const Job = struct {
     fn signIn(self: *Job) void {
         self.token = authorize(self.cloud) catch |e| blk: {
             self.problem = switch (e) {
-                error.Denied => "Sign-in was cancelled.",
+                error.Denied => "Sign-in was denied. Try again, or use Publr without Cloud.",
                 error.TimedOut => "Sign-in took too long. Try again.",
                 else => "Signing in to Publr Cloud did not work.",
             };
@@ -594,7 +594,7 @@ fn waitForCode(io: std.Io, a: std.mem.Allocator, listener: *std.Io.net.Server, s
         const body = try std.fmt.allocPrint(a, back_page, if (ok)
             .{ "Signed in to Publr Desktop", "You can close this tab and go back to Desktop." }
         else
-            .{ "Sign-in cancelled", "Desktop is still signed out. You can close this tab." });
+            .{ "Sign-in denied", "Publr Desktop is still signed out. You can close this tab." });
         try writer.interface.print("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}", .{ body.len, body });
         try writer.interface.flush();
         if (denied or !ok) return error.Denied;
