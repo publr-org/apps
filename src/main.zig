@@ -177,8 +177,6 @@ var sheet_busy: ?[]const u8 = null;
 var name_field: ui.TextField = undefined;
 /// A new site's first admin (an email), and Settings' admin for new sites.
 var admin_field: ui.TextField = undefined;
-/// Which of the sheet's fields takes typing.
-var sheet_focus: usize = 0;
 /// The admin set for new sites, read when a sheet opens that asks for one.
 var saved_admin: []u8 = "";
 
@@ -1485,8 +1483,8 @@ fn draw() void {
     bar.draw(u, barState(&titles), theme) catch |e| return std.debug.print("studio: bar: {}\n", .{e});
     if (active == null and view == .settings) settings.draw(u, settingsState(), theme) catch |e| return std.debug.print("studio: settings: {}\n", .{e});
     if (open_sheet != null) {
-        var fields: [2]sheet.Field = undefined;
-        sheet.draw(u, sheetState(&fields), theme, sheet_focus, window) catch |e| return std.debug.print("studio: sheet: {}\n", .{e});
+        var fields: [1]sheet.Field = undefined;
+        sheet.draw(u, sheetState(&fields), theme, 0, window) catch |e| return std.debug.print("studio: sheet: {}\n", .{e});
     }
     surface.configure(w, h);
     const frame = surface.acquire() orelse return;
@@ -1550,10 +1548,7 @@ fn openNewSite() void {
     // On the Cloud filters it starts on Cloud; anywhere else on this Mac.
     const on_cloud = view == .cloud or view == .space;
     new_where = if (cloudOffered() and on_cloud) .cloud else .local;
-    loadSavedAdmin();
     name_field.set("");
-    admin_field.set(defaultAdmin());
-    sheet_focus = 0;
     sheet_error = null;
     sheet_busy = null;
     window.setTextInput(true);
@@ -1565,14 +1560,13 @@ fn openAdminSheet() void {
     open_sheet = .admin;
     loadSavedAdmin();
     admin_field.set(saved_admin);
-    sheet_focus = 0;
     sheet_error = null;
     sheet_busy = null;
     window.setTextInput(true);
     redrawAll();
 }
 
-fn adminState(fields: *[2]sheet.Field) sheet.State {
+fn adminState(fields: *[1]sheet.Field) sheet.State {
     const size = window.size();
     const problem = adminProblem(admin_field.value());
     fields[0] = .{
@@ -1630,14 +1624,6 @@ fn nameProblem(name: []const u8) ?[]const u8 {
     return null;
 }
 
-/// The admin a new site gets unless changed: the one set for new sites, else the Cloud account
-/// signed in; empty leaves it to the site's setup page.
-fn defaultAdmin() []const u8 {
-    const saved = saved_admin;
-    if (saved.len > 0) return saved;
-    return if (cloud.status == .signed_in) cloud.account_email else "";
-}
-
 fn adminProblem(email: []const u8) ?[]const u8 {
     if (email.len == 0) return null;
     const at = std.mem.indexOfScalar(u8, email, '@') orelse return "Not an email address.";
@@ -1645,7 +1631,7 @@ fn adminProblem(email: []const u8) ?[]const u8 {
     return null;
 }
 
-fn sheetState(fields: *[2]sheet.Field) sheet.State {
+fn sheetState(fields: *[1]sheet.Field) sheet.State {
     if (open_sheet == .admin) return adminState(fields);
     if (open_sheet == .deploy) return deployState(fields);
     if (open_sheet == .deployed) return deployedState();
@@ -1658,7 +1644,7 @@ fn sheetState(fields: *[2]sheet.Field) sheet.State {
     return state;
 }
 
-fn localState(fields: *[2]sheet.Field) sheet.State {
+fn localState(fields: *[1]sheet.Field) sheet.State {
     const size = window.size();
     const name = name_field.value();
     const problem = nameProblem(name);
@@ -1678,22 +1664,12 @@ fn localState(fields: *[2]sheet.Field) sheet.State {
             .text = "Lowercase letters, numbers and dashes. It is also the folder's name.",
         },
     };
-    const admin_problem = adminProblem(admin_field.value());
-    fields[1] = .{
-        .label = "Account email",
-        .field = &admin_field,
-        .placeholder = "you@example.com",
-        .note = if (admin_problem) |pr| .{
-            .text = pr,
-            .kind = .bad,
-        } else null,
-    };
     return .{
         .title = "New project",
         .description = "A project on this Mac, with the starter page. Deploy it to Publr Cloud whenever you like.",
-        .fields = fields[0..2],
+        .fields = fields[0..1],
         .primary = "Create project",
-        .primary_enabled = problem == null and admin_problem == null,
+        .primary_enabled = problem == null,
         .busy = sheet_busy,
         .hover = sheet_hover,
         .window_width = @floatCast(size.w),
@@ -1702,7 +1678,7 @@ fn localState(fields: *[2]sheet.Field) sheet.State {
 }
 
 fn sheetEvent(win: *native.Window, event: native.Event) void {
-    var fields: [2]sheet.Field = undefined;
+    var fields: [1]sheet.Field = undefined;
     switch (event) {
         .mouse_move => |m| {
             const h = sheet.hit(sheetState(&fields), u, m.x, m.y);
@@ -1721,23 +1697,13 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
             .cancel => if (deploy_job == null) closeSheet(),
             .option => |i| {
                 new_where = if (i == 1) .cloud else .local;
-                sheet_focus = 0;
                 sheet_error = null;
-                redrawAll();
-            },
-            .field => |i| {
-                sheet_focus = i;
                 redrawAll();
             },
             else => {},
         },
         .text_command => |c| switch (c) {
             .enter => primaryAction(),
-            .tab, .backtab => {
-                const n = sheetFields();
-                sheet_focus = if (c == .tab) (sheet_focus + 1) % n else (sheet_focus + n - 1) % n;
-                redrawAll();
-            },
             .escape => if (sheet_busy == null and deploy_job == null) closeSheet(),
             else => if (sheetTypes() and sheetField().handle(event)) fieldChanged(),
         },
@@ -1749,15 +1715,7 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
 fn sheetField() *ui.TextField {
     if (open_sheet == .deploy) return &address_field;
     if (open_sheet == .admin) return &admin_field;
-    // A new project on this Mac has its admin's field too.
-    if (sheet_focus == 1 and !(new_where == .cloud and cloudOffered())) return &admin_field;
     return &name_field;
-}
-
-/// How many fields the sheet has, for Tab.
-fn sheetFields() usize {
-    if (open_sheet == .new_project and !(new_where == .cloud and cloudOffered())) return 2;
-    return 1;
 }
 
 /// The sheet takes typing (the deployed sheet has no field).
@@ -1842,7 +1800,7 @@ fn addressAnswered(slug: []const u8, answer: @import("cloud.zig").Availability) 
     redrawAll();
 }
 
-fn deployState(fields: *[2]sheet.Field) sheet.State {
+fn deployState(fields: *[1]sheet.Field) sheet.State {
     const size = window.size();
     var db: [128]u8 = undefined;
     const domain = cloud.projectDomain(&db);
@@ -2020,17 +1978,12 @@ fn deployedState() sheet.State {
 
 fn createSite() void {
     if (sheet_busy != null or nameProblem(name_field.value()) != null) return;
-    const admin = admin_field.value();
-    if (adminProblem(admin) != null) return;
-    // The first admin typed, with none set for new sites and none from Cloud: kept for the next.
-    const from_cloud = cloud.status == .signed_in and std.mem.eql(u8, admin, cloud.account_email);
-    if (admin.len > 0 and !from_cloud and saved_admin.len == 0) {
-        _ = sites.setDefaultAdmin(admin);
-    }
+    // The default account email from Settings; none leaves the admin to the site's setup page.
+    loadSavedAdmin();
     const job = gpa.create(NewSite) catch return;
     job.* = .{
         .name = gpa.dupe(u8, name_field.value()) catch return,
-        .admin = gpa.dupe(u8, admin) catch return,
+        .admin = gpa.dupe(u8, saved_admin) catch return,
     };
     sheet_busy = "Making the site…";
     redrawAll();
@@ -2048,7 +2001,7 @@ fn projectNameProblem(name: []const u8) ?[]const u8 {
     return null;
 }
 
-fn projectState(fields: *[2]sheet.Field) sheet.State {
+fn projectState(fields: *[1]sheet.Field) sheet.State {
     const size = window.size();
     const a = frame_arena.allocator();
     const space = cloud.spaces[targetSpace()].name;
@@ -2807,11 +2760,7 @@ fn commandState(a: std.mem.Allocator) settings.Command {
 
 /// Settings' admin for new sites, as people read it.
 fn settingsAdmin() []const u8 {
-    if (settings_admin.len > 0) return settings_admin;
-    if (cloud.status == .signed_in and cloud.account_email.len > 0) {
-        return cloud.account_email;
-    }
-    return "Not set";
+    return if (settings_admin.len > 0) settings_admin else "Not set";
 }
 
 fn settingsState() settings.State {
