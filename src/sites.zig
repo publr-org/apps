@@ -163,14 +163,34 @@ pub const Sites = struct {
 
     /// Makes a site in the default folder, set up and started, on the newest Publr
     /// (fetched when this Mac has none yet); false when it failed.
-    pub fn make(self: *Sites, name: []const u8) bool {
+    /// `admin` is its first admin, signed in from Studio; empty leaves it to the setup page.
+    pub fn make(self: *Sites, name: []const u8, admin: []const u8) bool {
         var arena: std.heap.ArenaAllocator = .init(self.gpa);
         defer arena.deinit();
         var config = core.Config.load(self.io, arena.allocator(), self.env) catch return false;
-        _ = core.project.new(&config, name, self.command_path, .{}) catch |e| {
+        _ = core.project.new(&config, name, self.command_path, .{
+            .admin = admin,
+        }) catch |e| {
             std.debug.print("studio: new site {s}: {t}\n", .{ name, e });
             return false;
         };
+        return true;
+    }
+
+    /// The admin new sites get (`publr config admin`), in `a`; empty when none is set.
+    pub fn defaultAdmin(self: *Sites, a: std.mem.Allocator) []const u8 {
+        const config = core.Config.load(self.io, a, self.env) catch return "";
+        return config.admin;
+    }
+
+    /// The admin new sites get from now on; empty forgets it. False when it was not saved.
+    pub fn setDefaultAdmin(self: *Sites, email: []const u8) bool {
+        var arena: std.heap.ArenaAllocator = .init(self.gpa);
+        defer arena.deinit();
+        var config = core.Config.load(self.io, arena.allocator(), self.env) catch return false;
+        config.admin = email;
+        config.admin_name = "";
+        config.save() catch return false;
         return true;
     }
 

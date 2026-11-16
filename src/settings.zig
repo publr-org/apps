@@ -49,6 +49,8 @@ pub const State = struct {
     folders: []const []const u8,
     /// The build every project runs, as people read it; null when each runs its own version.
     publr: ?[]const u8,
+    /// Who every new site gets as its admin, as people read it ("Your Cloud account", an email).
+    admin: []const u8,
     command: Command,
     /// Advanced is unfolded.
     advanced: bool,
@@ -64,6 +66,7 @@ pub const Target = union(enum) {
     change_folder,
     add_folder,
     remove_folder: usize,
+    change_admin,
     install,
     advanced,
     choose_publr,
@@ -108,9 +111,22 @@ fn addRect(s: State, u: *ui.Ui) ui.Rect {
     return buttonAt(u, column(s).x, otherRow(s, 0).y + rows * row_height + 8, add_label);
 }
 
-fn commandTitle(s: State, u: *ui.Ui) f32 {
+fn newSitesTitle(s: State, u: *ui.Ui) f32 {
     const add = addRect(s, u);
     return add.y + add.h + section_gap;
+}
+
+fn adminRow(s: State, u: *ui.Ui) ui.Rect {
+    return row(s, newSitesTitle(s, u) + title_step + 18, 0);
+}
+
+fn adminChangeRect(s: State, u: *ui.Ui) ui.Rect {
+    return rowButton(u, adminRow(s, u), change_label);
+}
+
+fn commandTitle(s: State, u: *ui.Ui) f32 {
+    const admin = adminRow(s, u);
+    return admin.y + admin.h + section_gap;
 }
 
 fn installRect(s: State, u: *ui.Ui) ui.Rect {
@@ -216,6 +232,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (changeRect(s, u).contains(x, y)) return .change_folder;
     for (0..s.folders.len) |i| if (removeRect(s, u, i).contains(x, y)) return .{ .remove_folder = i };
     if (addRect(s, u).contains(x, y)) return .add_folder;
+    if (adminChangeRect(s, u).contains(x, y)) return .change_admin;
     if (s.command == .missing and installRect(s, u).contains(x, y)) return .install;
     if (advancedRect(s, u).contains(x, y)) return .advanced;
     if (!s.advanced) return .none;
@@ -267,6 +284,12 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
         try button(u, t, removeRect(s, u, i), remove_label, same(s.hover, .{ .remove_folder = i }), true);
     }
     try button(u, t, addRect(s, u), add_label, same(s.hover, .add_folder), true);
+
+    // New sites.
+    try sectionTitle(u, t, c, newSitesTitle(s, u), "New sites");
+    try smallLabel(u, t, c, adminRow(s, u).y - 18, "Admin");
+    try pathRow(u, t, adminRow(s, u), s.admin);
+    try button(u, t, adminChangeRect(s, u), change_label, same(s.hover, .change_admin), true);
 
     // Terminal's command.
     const ct = commandTitle(s, u);

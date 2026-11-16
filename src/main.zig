@@ -148,6 +148,8 @@ var open_sheet: ?enum {
     deploy,
     /// The site is live: where, and its buttons.
     deployed,
+    /// Settings' admin for new sites.
+    admin,
 } = null;
 var deploy_progress: deploying.Progress = .{};
 var auto_deploy = false;
@@ -173,6 +175,17 @@ var sheet_error: ?[]const u8 = null;
 var problem_text: []const u8 = "";
 var sheet_busy: ?[]const u8 = null;
 var name_field: ui.TextField = undefined;
+/// A new site's first admin (an email), and Settings' admin for new sites.
+var admin_field: ui.TextField = undefined;
+/// Which of the sheet's fields takes typing.
+var sheet_focus: usize = 0;
+/// The admin set for new sites, read when a sheet opens that asks for one.
+var saved_admin: []u8 = "";
+
+fn loadSavedAdmin() void {
+    if (saved_admin.len > 0) gpa.free(saved_admin);
+    saved_admin = gpa.dupe(u8, sites.defaultAdmin(frame_arena.allocator())) catch "";
+}
 /// Site names, most recently opened first.
 var recents: std.ArrayList([]const u8) = .empty;
 
@@ -235,6 +248,7 @@ pub fn main(init: std.process.Init) !void {
     loadRecents();
     name_field = .init(gpa);
     address_field = .init(gpa);
+    admin_field = .init(gpa);
     cloud = .init(gpa, io, env.get("STUDIO_CLOUD") orelse "https://cloud.publr.app", cloudChanged);
     cloud.no_browser = env.get("STUDIO_NO_BROWSER") != null;
     cloud.refresh();
@@ -1471,8 +1485,8 @@ fn draw() void {
     bar.draw(u, barState(&titles), theme) catch |e| return std.debug.print("studio: bar: {}\n", .{e});
     if (active == null and view == .settings) settings.draw(u, settingsState(), theme) catch |e| return std.debug.print("studio: settings: {}\n", .{e});
     if (open_sheet != null) {
-        var fields: [1]sheet.Field = undefined;
-        sheet.draw(u, sheetState(&fields), theme, 0, window) catch |e| return std.debug.print("studio: sheet: {}\n", .{e});
+        var fields: [2]sheet.Field = undefined;
+        sheet.draw(u, sheetState(&fields), theme, sheet_focus, window) catch |e| return std.debug.print("studio: sheet: {}\n", .{e});
     }
     surface.configure(w, h);
     const frame = surface.acquire() orelse return;
@@ -1536,10 +1550,65 @@ fn openNewSite() void {
     // On the Cloud filters it starts on Cloud; anywhere else on this Mac.
     const on_cloud = view == .cloud or view == .space;
     new_where = if (cloudOffered() and on_cloud) .cloud else .local;
+    loadSavedAdmin();
     name_field.set("");
+    admin_field.set(defaultAdmin());
+    sheet_focus = 0;
     sheet_error = null;
     sheet_busy = null;
     window.setTextInput(true);
+    redrawAll();
+}
+
+/// Settings' admin for new sites, in a sheet of its own.
+fn openAdminSheet() void {
+    open_sheet = .admin;
+    loadSavedAdmin();
+    admin_field.set(saved_admin);
+    sheet_focus = 0;
+    sheet_error = null;
+    sheet_busy = null;
+    window.setTextInput(true);
+    redrawAll();
+}
+
+fn adminState(fields: *[2]sheet.Field) sheet.State {
+    const size = window.size();
+    const problem = adminProblem(admin_field.value());
+    fields[0] = .{
+        .label = "Email",
+        .field = &admin_field,
+        .placeholder = "you@example.com",
+        .note = if (sheet_error) |e| .{
+            .text = e,
+            .kind = .bad,
+        } else if (problem) |pr| .{
+            .text = pr,
+            .kind = .bad,
+        } else .{
+            .text = if (cloud.status == .signed_in) "Empty: your Cloud account." else "Empty: each site's setup page makes it.",
+        },
+    };
+    return .{
+        .title = "Admin for new sites",
+        .description = "Every new project on this Mac gets this admin, signed in from Studio.",
+        .fields = fields[0..1],
+        .primary = "Save",
+        .primary_enabled = problem == null,
+        .hover = sheet_hover,
+        .window_width = @floatCast(size.w),
+        .window_height = @floatCast(size.h),
+    };
+}
+
+fn saveAdmin() void {
+    if (adminProblem(admin_field.value()) != null) return;
+    if (!sites.setDefaultAdmin(admin_field.value())) {
+        sheet_error = "The setting could not be saved.";
+        return redrawAll();
+    }
+    closeSheet();
+    loadSettings();
     redrawAll();
 }
 
@@ -1563,7 +1632,33 @@ fn nameProblem(name: []const u8) ?[]const u8 {
     return null;
 }
 
-fn sheetState(fields: *[1]sheet.Field) sheet.State {
+/// The admin a new site gets unless changed: the one set for new sites, else the Cloud account
+/// signed in; empty leaves it to the site's setup page.
+fn defaultAdmin() []const u8 {
+    const saved = saved_admin;
+    if (saved.len > 0) return saved;
+    return if (cloud.status == .signed_in) cloud.account_email else "";
+}
+
+fn adminProblem(email: []const u8) ?[]const u8 {
+    if (email.len == 0) return null;
+    const at = std.mem.indexOfScalar(u8, email, '@') orelse return "An email address.";
+    if (at == 0 or at == email.len - 1 or std.mem.indexOfAny(u8, email, " \t") != null) return "An email address.";
+    return null;
+}
+
+/// What happens with the admin typed for a new site.
+fn adminNote(email: []const u8) []const u8 {
+    if (email.len == 0) return "None: the site's setup page makes it.";
+    const saved = saved_admin;
+    if (saved.len == 0 and cloud.status == .signed_in and std.mem.eql(u8, email, cloud.account_email)) return "Your Cloud account, signed in from Studio.";
+    if (saved.len == 0) return "Signed in from Studio, and kept for new sites.";
+    if (std.mem.eql(u8, email, saved)) return "Signed in from Studio. Change it for new sites in Settings.";
+    return "Signed in from Studio, for this site.";
+}
+
+fn sheetState(fields: *[2]sheet.Field) sheet.State {
+    if (open_sheet == .admin) return adminState(fields);
     if (open_sheet == .deploy) return deployState(fields);
     if (open_sheet == .deployed) return deployedState();
     var state = if (new_where == .cloud and cloudOffered()) projectState(fields) else localState(fields);
@@ -1575,7 +1670,7 @@ fn sheetState(fields: *[1]sheet.Field) sheet.State {
     return state;
 }
 
-fn localState(fields: *[1]sheet.Field) sheet.State {
+fn localState(fields: *[2]sheet.Field) sheet.State {
     const size = window.size();
     const name = name_field.value();
     const problem = nameProblem(name);
@@ -1595,12 +1690,24 @@ fn localState(fields: *[1]sheet.Field) sheet.State {
             .text = "Lowercase letters, numbers and dashes. It is also the folder's name.",
         },
     };
+    const admin_problem = adminProblem(admin_field.value());
+    fields[1] = .{
+        .label = "Admin",
+        .field = &admin_field,
+        .placeholder = "you@example.com",
+        .note = if (admin_problem) |pr| .{
+            .text = pr,
+            .kind = .bad,
+        } else .{
+            .text = adminNote(admin_field.value()),
+        },
+    };
     return .{
         .title = "New project",
         .description = "A project on this Mac, with the starter page. Deploy it to Publr Cloud whenever you like.",
-        .fields = fields[0..1],
+        .fields = fields[0..2],
         .primary = "Create project",
-        .primary_enabled = problem == null,
+        .primary_enabled = problem == null and admin_problem == null,
         .busy = sheet_busy,
         .hover = sheet_hover,
         .window_width = @floatCast(size.w),
@@ -1609,7 +1716,7 @@ fn localState(fields: *[1]sheet.Field) sheet.State {
 }
 
 fn sheetEvent(win: *native.Window, event: native.Event) void {
-    var fields: [1]sheet.Field = undefined;
+    var fields: [2]sheet.Field = undefined;
     switch (event) {
         .mouse_move => |m| {
             const h = sheet.hit(sheetState(&fields), u, m.x, m.y);
@@ -1628,13 +1735,23 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
             .cancel => if (deploy_job == null) closeSheet(),
             .option => |i| {
                 new_where = if (i == 1) .cloud else .local;
+                sheet_focus = 0;
                 sheet_error = null;
+                redrawAll();
+            },
+            .field => |i| {
+                sheet_focus = i;
                 redrawAll();
             },
             else => {},
         },
         .text_command => |c| switch (c) {
             .enter => primaryAction(),
+            .tab, .backtab => {
+                const n = sheetFields();
+                sheet_focus = if (c == .tab) (sheet_focus + 1) % n else (sheet_focus + n - 1) % n;
+                redrawAll();
+            },
             .escape => if (sheet_busy == null and deploy_job == null) closeSheet(),
             else => if (sheetTypes() and sheetField().handle(event)) fieldChanged(),
         },
@@ -1644,7 +1761,17 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
 }
 
 fn sheetField() *ui.TextField {
-    return if (open_sheet == .deploy) &address_field else &name_field;
+    if (open_sheet == .deploy) return &address_field;
+    if (open_sheet == .admin) return &admin_field;
+    // A new project on this Mac has its admin's field too.
+    if (sheet_focus == 1 and !(new_where == .cloud and cloudOffered())) return &admin_field;
+    return &name_field;
+}
+
+/// How many fields the sheet has, for Tab.
+fn sheetFields() usize {
+    if (open_sheet == .new_project and !(new_where == .cloud and cloudOffered())) return 2;
+    return 1;
 }
 
 /// The sheet takes typing (the deployed sheet has no field).
@@ -1664,6 +1791,7 @@ fn fieldChanged() void {
 fn primaryAction() void {
     switch (open_sheet orelse return) {
         .new_project => if (new_where == .cloud and cloudOffered()) createProject() else createSite(),
+        .admin => saveAdmin(),
         .deploy => startDeploy(),
         .deployed => {
             var buf: [512]u8 = undefined;
@@ -1728,7 +1856,7 @@ fn addressAnswered(slug: []const u8, answer: @import("cloud.zig").Availability) 
     redrawAll();
 }
 
-fn deployState(fields: *[1]sheet.Field) sheet.State {
+fn deployState(fields: *[2]sheet.Field) sheet.State {
     const size = window.size();
     var db: [128]u8 = undefined;
     const domain = cloud.projectDomain(&db);
@@ -1906,9 +2034,17 @@ fn deployedState() sheet.State {
 
 fn createSite() void {
     if (sheet_busy != null or nameProblem(name_field.value()) != null) return;
+    const admin = admin_field.value();
+    if (adminProblem(admin) != null) return;
+    // The first admin typed, with none set for new sites and none from Cloud: kept for the next.
+    const from_cloud = cloud.status == .signed_in and std.mem.eql(u8, admin, cloud.account_email);
+    if (admin.len > 0 and !from_cloud and saved_admin.len == 0) {
+        _ = sites.setDefaultAdmin(admin);
+    }
     const job = gpa.create(NewSite) catch return;
     job.* = .{
         .name = gpa.dupe(u8, name_field.value()) catch return,
+        .admin = gpa.dupe(u8, admin) catch return,
     };
     sheet_busy = "Making the site…";
     redrawAll();
@@ -1926,7 +2062,7 @@ fn projectNameProblem(name: []const u8) ?[]const u8 {
     return null;
 }
 
-fn projectState(fields: *[1]sheet.Field) sheet.State {
+fn projectState(fields: *[2]sheet.Field) sheet.State {
     const size = window.size();
     const a = frame_arena.allocator();
     const space = cloud.spaces[targetSpace()].name;
@@ -1985,10 +2121,11 @@ fn projectMade(made: @import("cloud.zig").Made) void {
 /// `p new` makes the site with the starter page and starts it: off the main thread.
 const NewSite = struct {
     name: []const u8,
+    admin: []const u8,
     ok: bool = false,
 
     fn run(self: *NewSite) void {
-        self.ok = sites.make(self.name);
+        self.ok = sites.make(self.name, self.admin);
         native.runOnMain(self, done);
     }
 
@@ -1996,6 +2133,7 @@ const NewSite = struct {
         const self: *NewSite = @ptrCast(@alignCast(ctx));
         defer {
             gpa.free(self.name);
+            gpa.free(self.admin);
             gpa.destroy(self);
         }
         sheet_busy = null;
@@ -2619,6 +2757,8 @@ var settings_folders: []const []const u8 = &.{};
 var settings_shown: []const []const u8 = &.{};
 /// The Publr every site runs, as people read it; null when each runs its own release.
 var settings_publr: ?[]const u8 = null;
+/// The admin set for new sites (`publr config admin`); empty when none is.
+var settings_admin: []const u8 = "";
 var settings_command: settings.Command = .missing;
 /// Advanced is unfolded (for this run only).
 var settings_advanced = false;
@@ -2657,6 +2797,7 @@ fn loadSettings() void {
     for (config.folders, shown) |f, *out| out.* = shortFolder(a, f);
     settings_shown = shown;
     settings_publr = if (config.publr.len > 0) shortFolder(a, config.publr) else null;
+    settings_admin = config.admin;
     settings_command = commandState(a);
 }
 
@@ -2678,6 +2819,15 @@ fn commandState(a: std.mem.Allocator) settings.Command {
     };
 }
 
+/// Settings' admin for new sites, as people read it.
+fn settingsAdmin() []const u8 {
+    if (settings_admin.len > 0) return settings_admin;
+    if (cloud.status == .signed_in and cloud.account_email.len > 0) {
+        return std.fmt.allocPrint(frame_arena.allocator(), "Your Cloud account ({s})", .{cloud.account_email}) catch "Your Cloud account";
+    }
+    return "None: each site's setup page makes it";
+}
+
 fn settingsState() settings.State {
     const size = window.size();
     return .{
@@ -2688,6 +2838,7 @@ fn settingsState() settings.State {
         .folder = settings_folder,
         .folders = settings_shown,
         .publr = settings_publr,
+        .admin = settingsAdmin(),
         .command = settings_command,
         .advanced = settings_advanced,
         .busy = settings_busy,
@@ -2702,6 +2853,7 @@ fn settingsState() settings.State {
 fn clickSettings(t: settings.Target) void {
     switch (t) {
         .change_folder => chooseFolder(.default),
+        .change_admin => openAdminSheet(),
         .add_folder => chooseFolder(.add),
         .remove_folder => |i| removeFolder(i),
         .install => installCommand(),
