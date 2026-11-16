@@ -48,6 +48,8 @@ pub const Cloud = struct {
     status: Status = .signed_out,
     token: ?[]u8 = null,
     account: []const u8 = "",
+    /// The account's email: the default account email for new sites when none is set.
+    account_email: []const u8 = "",
     spaces: []const Space = &.{},
     /// What the listing points into; replaced with each listing.
     listing: ?std.heap.ArenaAllocator = null,
@@ -128,6 +130,7 @@ pub const Cloud = struct {
         self.listing = null;
         self.spaces = &.{};
         self.account = "";
+        self.account_email = "";
     }
 
     /// Where projects live: the host projects' addresses end in (`publr.app`), from a
@@ -481,6 +484,7 @@ const Job = struct {
             c.listing = self.arena;
             c.spaces = l.spaces;
             c.account = if (l.account.name.len > 0) l.account.name else l.account.email;
+            c.account_email = l.account.email;
         }
         c.status = if (c.token != null) .signed_in else .signed_out;
         c.changed();

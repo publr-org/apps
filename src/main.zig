@@ -184,6 +184,13 @@ fn loadSavedAdmin() void {
     if (saved_admin.len > 0) gpa.free(saved_admin);
     saved_admin = gpa.dupe(u8, sites.defaultAdmin(frame_arena.allocator())) catch "";
 }
+
+/// The default account email: the one set in Settings, else the Cloud account signed in;
+/// empty leaves a new site's admin to its setup page.
+fn defaultAccount() []const u8 {
+    if (saved_admin.len > 0) return saved_admin;
+    return if (cloud.status == .signed_in) cloud.account_email else "";
+}
 /// Site names, most recently opened first.
 var recents: std.ArrayList([]const u8) = .empty;
 
@@ -1983,7 +1990,7 @@ fn createSite() void {
     const job = gpa.create(NewSite) catch return;
     job.* = .{
         .name = gpa.dupe(u8, name_field.value()) catch return,
-        .admin = gpa.dupe(u8, saved_admin) catch return,
+        .admin = gpa.dupe(u8, defaultAccount()) catch return,
     };
     sheet_busy = "Making the site…";
     redrawAll();
@@ -2760,7 +2767,9 @@ fn commandState(a: std.mem.Allocator) settings.Command {
 
 /// Settings' admin for new sites, as people read it.
 fn settingsAdmin() []const u8 {
-    return if (settings_admin.len > 0) settings_admin else "Not set";
+    if (settings_admin.len > 0) return settings_admin;
+    if (cloud.status == .signed_in and cloud.account_email.len > 0) return cloud.account_email;
+    return "Not set";
 }
 
 fn settingsState() settings.State {
