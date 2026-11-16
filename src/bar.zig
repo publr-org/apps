@@ -13,6 +13,7 @@ const home_width: f32 = 44;
 const tab_max: f32 = 200;
 const tab_min: f32 = 96;
 const plus_width: f32 = 36;
+const browser_width: f32 = 40;
 const close_size: f32 = 20;
 
 pub const Target = union(enum) {
@@ -23,6 +24,8 @@ pub const Target = union(enum) {
     tab: usize,
     tab_close: usize,
     plus,
+    /// The page the tab shows, opened in the person's browser.
+    browser,
 };
 
 pub const State = struct {
@@ -31,10 +34,12 @@ pub const State = struct {
     active: ?usize,
     hover: Target,
     width: f32,
+    /// The tab shows a web page, which the bar offers to open in the browser.
+    browser: bool = false,
 };
 
 fn tabWidth(s: State) f32 {
-    const room = s.width - lights_width - home_width - plus_width - 8;
+    const room = s.width - lights_width - home_width - plus_width - browser_width - 8;
     const n: f32 = @floatFromInt(@max(s.titles.len, 1));
     return std.math.clamp(room / n, tab_min, tab_max);
 }
@@ -77,6 +82,16 @@ pub fn plusRect(s: State) ui.Rect {
     };
 }
 
+/// Open in browser, at the bar's right end.
+pub fn browserRect(s: State) ui.Rect {
+    return .{
+        .x = s.width - browser_width - 8,
+        .y = 0,
+        .w = browser_width,
+        .h = height,
+    };
+}
+
 pub fn hit(s: State, x: f64, y: f64) Target {
     if (y >= height) return .none;
     if (homeRect().contains(x, y)) return .home;
@@ -87,6 +102,7 @@ pub fn hit(s: State, x: f64, y: f64) Target {
         return .{ .tab = i };
     }
     if (plusRect(s).contains(x, y)) return .plus;
+    if (s.browser and browserRect(s).contains(x, y)) return .browser;
     return .bar;
 }
 
@@ -97,6 +113,7 @@ pub fn targetRect(s: State, t: Target) ?ui.Rect {
         .home => homeRect(),
         .tab, .tab_close => |i| if (i < s.titles.len) tabRect(s, i) else null,
         .plus => plusRect(s),
+        .browser => browserRect(s),
     };
 }
 
@@ -148,6 +165,18 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
         .h = height - 14,
     }, t.tab_hover, 4);
     try u.icon(centred(plus, 16), icons.plus, t.text2);
+
+    if (s.browser) {
+        const browser = browserRect(s);
+        const hovered = same(s.hover, .browser);
+        if (hovered) try u.rect(.{
+            .x = browser.x + 6,
+            .y = 7,
+            .w = browser.w - 12,
+            .h = height - 14,
+        }, t.tab_hover, 4);
+        try u.icon(centred(browser, 16), icons.external, if (hovered) t.text else t.text2);
+    }
 
     // The line between the bar and what is under it.
     try u.rect(.{

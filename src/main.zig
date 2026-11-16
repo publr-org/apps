@@ -418,6 +418,7 @@ fn barState(titles: *[64][]const u8) bar.State {
             else => .none,
         },
         .width = @floatCast(window.size().w),
+        .browser = if (active) |i| webShown(tabs.items[i]) else false,
     };
 }
 
@@ -966,7 +967,7 @@ fn setHover(win: *native.Window, h: Hover) void {
     hover = h;
     win.setCursor(switch (h) {
         .bar => |b| switch (b) {
-            .home, .tab, .tab_close, .plus => .pointer,
+            .home, .tab, .tab_close, .plus, .browser => .pointer,
             else => .arrow,
         },
         .home => |t| switch (t) {
@@ -987,6 +988,7 @@ fn click(win: *native.Window, m: native.event.Mouse) void {
         .bar => |b| switch (b) {
             .bar => if (m.clicks == 2) win.titlebarDoubleClick() else win.dragWindow(),
             .home, .plus => showHome(),
+            .browser => if (active) |i| openInBrowser(tabs.items[i]),
             .tab => |i| showTab(i),
             .tab_close => |i| closeTab(i),
             .none => {},
