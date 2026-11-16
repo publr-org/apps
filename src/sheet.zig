@@ -1,5 +1,6 @@
 //! A sheet: the modal panel over Home that asks for something (New site, Deploy to Cloud).
-//! A title and a line saying what happens, fields with a note under each, and Cancel
+//! A title and a line saying what happens (a link under it, for more), fields with a note
+//! under each, and Cancel
 //! with the main button. Layout and hit testing together.
 
 const std = @import("std");
@@ -11,14 +12,32 @@ const width: f32 = 440;
 const pad: f32 = 24;
 const field_height: f32 = 36;
 const button_height: f32 = 36;
-/// The title (20), the line under it (40) and the room around them.
-const head: f32 = 20 + 8 + 40 + 12;
 /// The title alone, for a sheet with no line under it.
 const head_bare: f32 = 20 + 16;
+/// The link's line under the description.
+const link_step: f32 = 24;
 
+/// The title (20), the description under it, its link, and the room around them.
 fn headHeight(s: State) f32 {
-    return if (s.description.len > 0) head else head_bare;
+    if (s.description.len == 0) return head_bare;
+    const link: f32 = if (s.link.len > 0) link_step else 0;
+    return 20 + 8 + s.description_height + link + 12;
 }
+
+fn linkRect(s: State, u: *ui.Ui) ui.Rect {
+    const p = panel(s);
+    return .{
+        .x = p.x + pad,
+        .y = p.y + pad + 28 + s.description_height + 4,
+        .w = u.measure(s.link, link_text),
+        .h = 18,
+    };
+}
+
+const link_text: ui.TextStyle = .{
+    .size = 13,
+    .weight = 500,
+};
 /// A field's label (22), the field and its note (26).
 const field_step: f32 = 22 + field_height + 26;
 /// A choice's label (22), its buttons and the room under them.
@@ -56,6 +75,10 @@ pub const Choice = struct {
 pub const State = struct {
     title: []const u8,
     description: []const u8,
+    /// Room for the description: two lines unless it says more.
+    description_height: f32 = 40,
+    /// A link under the description ("How accounts work"); empty for none.
+    link: []const u8 = "",
     /// Above the fields.
     choice: ?Choice = null,
     fields: []const Field,
@@ -73,6 +96,7 @@ pub const Target = union(enum) {
     none,
     primary,
     cancel,
+    link,
     field: usize,
     option: usize,
 };
@@ -141,6 +165,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (s.busy == null) {
         if (buttonRect(s, u, .primary).contains(x, y)) return .primary;
         if (buttonRect(s, u, .cancel).contains(x, y)) return .cancel;
+        if (s.link.len > 0 and linkRect(s, u).contains(x, y)) return .link;
         if (s.choice) |c| for (0..c.options.len) |i| {
             if (optionRect(s, i).contains(x, y)) return .{ .option = i };
         };
@@ -184,12 +209,27 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme, focus: ?usize, window: *native
         .x = p.x + pad,
         .y = p.y + pad + 28,
         .w = p.w - 2 * pad,
-        .h = 40,
+        .h = s.description_height,
     }, s.description, .{
         .size = 13,
         .color = t.text2,
         .truncate = false,
     });
+    if (s.link.len > 0) {
+        const l = linkRect(s, u);
+        const over = std.meta.eql(s.hover, Target.link);
+        try u.text(l, s.link, .{
+            .size = link_text.size,
+            .weight = link_text.weight,
+            .color = t.text,
+        });
+        try u.rect(.{
+            .x = l.x,
+            .y = l.y + l.h - 1,
+            .w = l.w,
+            .h = 1,
+        }, if (over) t.text else t.text3, 0);
+    }
     if (s.choice) |c| try drawChoice(u, s, t, c);
     for (s.fields, 0..) |f, i| {
         const r = fieldRect(s, i);

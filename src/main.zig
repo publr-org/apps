@@ -20,6 +20,7 @@ const Thumbs = @import("thumbs.zig").Thumbs;
 const sheet = @import("sheet.zig");
 const settings = @import("settings.zig");
 const command_line = @import("command_line.zig");
+const welcome = @import("welcome.zig");
 const Cloud = @import("cloud.zig").Cloud;
 const deploying = @import("deploy.zig");
 
@@ -1493,7 +1494,9 @@ fn draw() void {
     if (active) |i| if (tabs.items[i].project != null) project.draw(u, projectPage(i), theme) catch |e| return std.debug.print("desktop: project: {}\n", .{e});
     bar.draw(u, barState(&titles), theme) catch |e| return std.debug.print("desktop: bar: {}\n", .{e});
     if (active == null and view == .settings) settings.draw(u, settingsState(), theme) catch |e| return std.debug.print("desktop: settings: {}\n", .{e});
-    if (open_sheet != null) {
+    if (open_sheet == .welcome) {
+        welcome.draw(u, welcomeState(), theme) catch |e| return std.debug.print("desktop: welcome: {}\n", .{e});
+    } else if (open_sheet != null) {
         var fields: [1]sheet.Field = undefined;
         sheet.draw(u, sheetState(&fields), theme, 0, window) catch |e| return std.debug.print("desktop: sheet: {}\n", .{e});
     }
@@ -1584,19 +1587,47 @@ fn welcomeIfNew() void {
     redrawAll();
 }
 
-fn welcomeState() sheet.State {
+var welcome_hover: welcome.Target = .none;
+/// The email sheet was opened from the welcome: its second button skips it.
+var admin_from_welcome = false;
+/// Where accounts are explained, for the welcome and the email sheet.
+const accounts_docs = "https://publr.app/docs/account";
+
+fn welcomeState() welcome.State {
     const size = window.size();
     return .{
-        .title = "Welcome to Publr Desktop",
-        .description = "Sign in to Publr Cloud to use one account for all your projects and put them online in one click. It's free. Or keep everything on this Mac.",
-        .fields = &.{},
-        .primary = "Sign in to Publr Cloud",
-        .primary_enabled = true,
-        .secondary = "Continue without Cloud",
-        .hover = sheet_hover,
         .window_width = @floatCast(size.w),
         .window_height = @floatCast(size.h),
+        .hover = welcome_hover,
     };
+}
+
+fn welcomeEvent(win: *native.Window, event: native.Event) void {
+    switch (event) {
+        .mouse_move => |m| {
+            const h = welcome.hit(welcomeState(), u, m.x, m.y);
+            if (h != welcome_hover) {
+                welcome_hover = h;
+                win.setCursor(if (h == .none) .arrow else .pointer);
+                redrawAll();
+            }
+        },
+        .mouse_down => |m| switch (welcome.hit(welcomeState(), u, m.x, m.y)) {
+            .cloud => primaryAction(),
+            .local => {
+                admin_from_welcome = true;
+                openAdminSheet();
+            },
+            .link => native.openInBrowser(accounts_docs),
+            .none => {},
+        },
+        .text_command => |c| switch (c) {
+            .enter => primaryAction(),
+            .escape => closeSheet(),
+            else => {},
+        },
+        else => {},
+    }
 }
 
 /// Settings' admin for new sites, in a sheet of its own.
@@ -1627,10 +1658,13 @@ fn adminState(fields: *[1]sheet.Field) sheet.State {
     };
     return .{
         .title = "Default account email",
-        .description = "",
+        .description = "Every project you make gets this account, so it opens with you signed in. Without one, each project asks you to make an account the first time you open its admin.",
+        .description_height = 58,
+        .link = "How accounts work",
         .fields = fields[0..1],
         .primary = "Save",
         .primary_enabled = problem == null,
+        .secondary = if (admin_from_welcome) "Skip" else "Cancel",
         .hover = sheet_hover,
         .window_width = @floatCast(size.w),
         .window_height = @floatCast(size.h),
@@ -1651,6 +1685,8 @@ fn saveAdmin() void {
 fn closeSheet() void {
     open_sheet = null;
     sheet_hover = .none;
+    welcome_hover = .none;
+    admin_from_welcome = false;
     window.setTextInput(false);
     redrawAll();
 }
@@ -1677,7 +1713,6 @@ fn adminProblem(email: []const u8) ?[]const u8 {
 
 fn sheetState(fields: *[1]sheet.Field) sheet.State {
     if (open_sheet == .admin) return adminState(fields);
-    if (open_sheet == .welcome) return welcomeState();
     if (open_sheet == .deploy) return deployState(fields);
     if (open_sheet == .deployed) return deployedState();
     var state = if (new_where == .cloud and cloudOffered()) projectState(fields) else localState(fields);
@@ -1723,6 +1758,7 @@ fn localState(fields: *[1]sheet.Field) sheet.State {
 }
 
 fn sheetEvent(win: *native.Window, event: native.Event) void {
+    if (open_sheet == .welcome) return welcomeEvent(win, event);
     var fields: [1]sheet.Field = undefined;
     switch (event) {
         .mouse_move => |m| {
@@ -1730,7 +1766,7 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
             if (!std.meta.eql(h, sheet_hover)) {
                 sheet_hover = h;
                 win.setCursor(switch (h) {
-                    .primary, .cancel, .option => .pointer,
+                    .primary, .cancel, .option, .link => .pointer,
                     .field => .text,
                     .none => .arrow,
                 });
@@ -1739,7 +1775,8 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
         },
         .mouse_down => |m| switch (sheet.hit(sheetState(&fields), u, m.x, m.y)) {
             .primary => primaryAction(),
-            .cancel => if (open_sheet == .welcome) openAdminSheet() else if (deploy_job == null) closeSheet(),
+            .cancel => if (deploy_job == null) closeSheet(),
+            .link => native.openInBrowser(accounts_docs),
             .option => |i| {
                 new_where = if (i == 1) .cloud else .local;
                 sheet_error = null;
