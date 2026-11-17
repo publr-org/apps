@@ -58,6 +58,8 @@ pub const Target = enum {
     tool_claude,
     tool_codex,
     tool_cursor,
+    tool_vscode,
+    tool_other,
 };
 
 fn toolTarget(tool: ai_tools.Tool) Target {
@@ -65,6 +67,8 @@ fn toolTarget(tool: ai_tools.Tool) Target {
         .claude => .tool_claude,
         .codex => .tool_codex,
         .cursor => .tool_cursor,
+        .vscode => .tool_vscode,
+        .other => .tool_other,
     };
 }
 
@@ -74,6 +78,8 @@ pub fn toolOf(target: Target) ?ai_tools.Tool {
         .tool_claude => .claude,
         .tool_codex => .codex,
         .tool_cursor => .cursor,
+        .tool_vscode => .vscode,
+        .tool_other => .other,
         else => null,
     };
 }

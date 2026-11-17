@@ -1743,7 +1743,7 @@ fn welcomeEvent(win: *native.Window, event: native.Event) void {
             .one_account => chooseWelcome(.one_account),
             .confirm => nextWelcome(),
             .link => native.openInBrowser(if (welcome_step == .tools) ai_docs else accounts_docs),
-            .tool_claude, .tool_codex, .tool_cursor => |h| {
+            .tool_claude, .tool_codex, .tool_cursor, .tool_vscode, .tool_other => |h| {
                 tools.connect(welcome.toolOf(h).?);
                 redrawAll();
             },

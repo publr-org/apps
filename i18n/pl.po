@@ -656,3 +656,15 @@ msgstr "Czekam na przeglądarkę…"
 
 msgid "Continue with Publr Cloud"
 msgstr "Kontynuuj z Publr Cloud"
+
+msgid "Other AI tool"
+msgstr "Inne narzędzie AI"
+
+msgid "Copied. Paste it into the tool’s MCP settings."
+msgstr "Skopiowano. Wklej to w ustawieniach MCP narzędzia."
+
+msgid "Add Publr to its MCP settings by hand."
+msgstr "Dodaj Publr ręcznie w jego ustawieniach MCP."
+
+msgid "Copy settings"
+msgstr "Kopiuj ustawienia"
