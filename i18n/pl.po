@@ -279,35 +279,11 @@ msgstr "Gdzie"
 msgid "Name"
 msgstr "Nazwa"
 
-msgid "Lowercase letters, numbers and dashes. It is also the folder's name."
-msgstr "Małe litery, cyfry i myślniki. To także nazwa folderu."
-
-msgid "A project on this Mac, with the starter page. Deploy it to Publr Cloud whenever you like."
-msgstr "Projekt na tym Macu, ze stroną startową. Wdróż go do Publr Cloud, kiedy zechcesz."
-
 msgid "Create project"
 msgstr "Utwórz projekt"
 
 msgid "In {space}."
 msgstr "W przestrzeni {space}."
-
-msgid "Available."
-msgstr "Wolny."
-
-msgid "Taken. Try another address."
-msgstr "Zajęty. Wypróbuj inny adres."
-
-msgid "Reserved by Publr. Try another address."
-msgstr "Zarezerwowany przez Publr. Wypróbuj inny adres."
-
-msgid "Lowercase letters, numbers and dashes, at least 3."
-msgstr "Małe litery, cyfry i myślniki, co najmniej 3."
-
-msgid "Publr Cloud could not be asked. Check your connection."
-msgstr "Nie udało się zapytać Publr Cloud. Sprawdź połączenie."
-
-msgid "The address your site will be live at."
-msgstr "Adres, pod którym projekt będzie dostępny."
 
 msgid "Checking…"
 msgstr "Sprawdzanie…"
@@ -353,15 +329,6 @@ msgstr "Tworzenie projektu…"
 
 msgid "At most 60 characters."
 msgstr "Najwyżej 60 znaków."
-
-msgid "Its address is made from the name, with six random characters."
-msgstr "Adres powstanie z nazwy i sześciu losowych znaków."
-
-msgid "My project"
-msgstr "Mój projekt"
-
-msgid "A project on Publr Cloud, in {space}, with the starter page."
-msgstr "Projekt w Publr Cloud, w przestrzeni {space}, ze stroną startową."
 
 msgid "Making the project…"
 msgstr "Tworzenie projektu…"
@@ -470,9 +437,6 @@ msgstr "Użyj Publr {version}"
 
 msgid "Admin"
 msgstr "Panel"
-
-msgid "Overview"
-msgstr "Przegląd"
 
 msgid "Send to Cloud"
 msgstr "Wyślij do Cloud"

@@ -146,19 +146,6 @@ pub const Cloud = struct {
         return std.fmt.bufPrint(buf, "{s}", .{rest}) catch "publr.app";
     }
 
-    /// Asks Cloud whether `slug` is free; `done` gets the answer on the main thread.
-    pub fn checkAddress(self: *Cloud, slug: []const u8, done: *const fn (slug: []const u8, answer: Availability) void) void {
-        const token = self.token orelse return;
-        const job = self.gpa.create(Check) catch return;
-        job.* = .{
-            .cloud = self,
-            .slug = self.gpa.dupe(u8, slug) catch return,
-            .token = self.gpa.dupe(u8, token) catch return,
-            .done = done,
-        };
-        native.spawn(Check.run, .{job}) catch return;
-    }
-
     /// Makes a project named `name` in `space`, with the starter page, as the dashboard's
     /// New project does: `slug` its address before the six `suffix` characters (empty: made
     /// from the name). `done` gets its address, or Cloud's reason, on the main thread.
@@ -227,53 +214,6 @@ fn hostPart(address: []const u8) []const u8 {
     const h = if (std.mem.indexOf(u8, address, "://")) |i| address[i + 3 ..] else address;
     return if (std.mem.indexOfScalar(u8, h, '/')) |s| h[0..s] else h;
 }
-
-pub const Availability = enum {
-    available,
-    taken,
-    reserved,
-    invalid,
-    /// Cloud could not be asked.
-    unknown,
-};
-
-const Check = struct {
-    cloud: *Cloud,
-    slug: []u8,
-    token: []u8,
-    answer: Availability = .unknown,
-    done: *const fn (slug: []const u8, answer: Availability) void,
-
-    fn run(self: *Check) void {
-        var arena: std.heap.ArenaAllocator = .init(self.cloud.gpa);
-        defer arena.deinit();
-        const a = arena.allocator();
-        const path = std.fmt.allocPrint(a, "/api/cloud.check_address?slug={s}", .{self.slug}) catch "";
-        if (request(self.cloud.io, a, self.cloud.base, .GET, path, .{
-            .token = self.token,
-        })) |reply| {
-            const Answer = struct {
-                available: bool = false,
-                reason: ?[]const u8 = null,
-            };
-            if (reply.status == .ok) if (std.json.parseFromSliceLeaky(Answer, a, reply.body, .{
-                .ignore_unknown_fields = true,
-            })) |ans| {
-                self.answer = if (ans.available) .available else if (ans.reason) |r| std.meta.stringToEnum(Availability, r) orelse .taken else .taken;
-            } else |_| {};
-        } else |_| {}
-        native.runOnMain(self, finish);
-    }
-
-    fn finish(ctx: ?*anyopaque) callconv(.c) void {
-        const self: *Check = @ptrCast(@alignCast(ctx));
-        const gpa = self.cloud.gpa;
-        self.done(self.slug, self.answer);
-        gpa.free(self.slug);
-        gpa.free(self.token);
-        gpa.destroy(self);
-    }
-};
 
 /// An app of a Cloud project changed (`update`: its name and path) or removed, as the
 /// dashboard's app cards do: `cloud.manage_apps`. `done` gets why not, or null.

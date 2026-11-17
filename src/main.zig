@@ -205,10 +205,7 @@ var home_dir: []const u8 = "";
 /// Deploy: the site going up, its address field, and what Cloud said of the address.
 var deploy_site: []const u8 = "";
 var address_field: ui.TextField = undefined;
-var availability: ?@import("cloud.zig").Availability = null;
 /// The address last asked about, and when the field last changed (asked after a pause).
-var checked_slug: std.ArrayList(u8) = .empty;
-var address_changed_at: i64 = 0;
 /// A site to deploy once the sign-in it started finishes.
 var deploy_after_sign_in: ?[]const u8 = null;
 var sheet_hover: sheet.Target = .none;
@@ -380,7 +377,7 @@ pub fn main(init: std.process.Init) !void {
             name_field.set(arg);
         }
         // `deploy:<site>[:auto]`: the sheet once the listing is in (signed in already);
-        // `auto` presses Deploy once the address is free and prints each step (tests).
+        // `auto` presses Deploy at once and prints each step (tests).
         if (std.mem.startsWith(u8, o, "deploy")) {
             const site = if (std.mem.indexOfScalar(u8, arg, ':')) |c| arg[0..c] else arg;
             auto_deploy = std.mem.endsWith(u8, arg, ":auto");
@@ -1011,7 +1008,6 @@ fn onEvent(_: ?*anyopaque, win: *native.Window, event: native.Event) void {
     };
     switch (event) {
         .frame => {
-            if (open_sheet == .deploy) askAboutAddress();
             // The deploy's progress moves on its own.
             if (deploy_job != null) {
                 dirty = true;
@@ -1913,14 +1909,19 @@ fn openNewSite() void {
     slug_field.set("");
     slug_edited = false;
     sheet_focus = 0;
-    const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-    var random: [6]u8 = undefined;
-    io.random(&random);
-    for (&new_suffix, random) |*c, b| c.* = alphabet[b % alphabet.len];
+    freshSuffix();
     sheet_error = null;
     sheet_busy = null;
     window.setTextInput(true);
     redrawAll();
+}
+
+/// Six new characters for the end of a Cloud address.
+fn freshSuffix() void {
+    const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+    var random: [6]u8 = undefined;
+    io.random(&random);
+    for (&new_suffix, random) |*c, b| c.* = alphabet[b % alphabet.len];
 }
 
 /// The core's rules for an address made from a name: a marked letter is its plain one (ż is
@@ -2307,10 +2308,6 @@ fn fieldChanged() void {
             slug_field.set(slugify(&buf, name_field.value()));
         }
     }
-    if (open_sheet == .deploy) {
-        availability = null;
-        address_changed_at = nowMs();
-    }
     redrawAll();
 }
 
@@ -2363,76 +2360,41 @@ fn deploy(name: []const u8) void {
     deploy_site = chosen;
     open_sheet = .deploy;
     address_field.set(name);
-    availability = null;
-    checked_slug.clearRetainingCapacity();
-    address_changed_at = 0;
+    freshSuffix();
     sheet_error = null;
     sheet_busy = null;
     window.setTextInput(true);
     redrawAll();
+    if (auto_deploy) startDeploy();
 }
 
 /// Asks Cloud about the address once the person stopped typing for a moment.
-fn askAboutAddress() void {
-    const slug = address_field.value();
-    if (slug.len == 0 or std.mem.eql(u8, slug, checked_slug.items)) return;
-    if (nowMs() - address_changed_at < 300) return;
-    checked_slug.clearRetainingCapacity();
-    checked_slug.appendSlice(gpa, slug) catch return;
-    cloud.checkAddress(slug, addressAnswered);
-}
-
-fn addressAnswered(slug: []const u8, answer: @import("cloud.zig").Availability) void {
-    // An answer about what the field said before is no answer.
-    if (!std.mem.eql(u8, slug, address_field.value())) return;
-    availability = answer;
-    if (auto_deploy) std.debug.print("desktop: address {s}: {t}\n", .{ slug, answer });
-    if (auto_deploy and answer == .available) startDeploy();
-    redrawAll();
-}
-
+/// Deploy, as New project on Cloud: the address typed (or made from the site's name), then
+/// six random characters, so it is never taken.
 fn deployState(fields: *[2]sheet.Field) sheet.State {
     const size = window.size();
     var db: [128]u8 = undefined;
     const domain = cloud.projectDomain(&db);
-    const suffix = std.fmt.allocPrint(frame_arena.allocator(), ".{s}", .{domain}) catch ".publr.app";
+    const suffix = std.fmt.allocPrint(frame_arena.allocator(), "-{s}.{s}", .{ &new_suffix, domain }) catch "";
     const space_name = if (cloud.spaces.len > 0) cloud.spaces[0].name else "";
     const in_space = filled(frame_arena.allocator(), translated("In {space}."), .{
         .space = space_name,
     }) catch "";
-    const note: sheet.Note = if (sheet_error) |e| .{
-        .text = e,
-        .kind = .bad,
-    } else if (availability) |av| switch (av) {
-        .available => .{
-            .text = translated("Available."),
-            .kind = .good,
-        },
-        .taken => .{
-            .text = translated("Taken. Try another address."),
-            .kind = .bad,
-        },
-        .reserved => .{
-            .text = translated("Reserved by Publr. Try another address."),
-            .kind = .bad,
-        },
-        .invalid => .{
-            .text = translated("Lowercase letters, numbers and dashes, at least 3."),
-            .kind = .bad,
-        },
-        .unknown => .{
-            .text = translated("Publr Cloud could not be asked. Check your connection."),
-            .kind = .bad,
-        },
-    } else .{
-        .text = if (address_field.value().len == 0) translated("The address your site will be live at.") else translated("Checking…"),
-    };
+    const valid = deployAddressValid(address_field.value());
     fields[0] = .{
         .label = translated("Address"),
         .field = &address_field,
-        .placeholder = "my-site",
+        .placeholder = translated("my-project"),
         .suffix = suffix,
-        .note = note,
+        .note = if (sheet_error) |e| .{
+            .text = e,
+            .kind = .bad,
+        } else if (!valid) .{
+            .text = translated("Lowercase letters, numbers and dashes only."),
+            .kind = .bad,
+        } else .{
+            .text = translated("The six characters at the end keep every address unique. Made from the name when left empty."),
+        },
     };
     const title = filled(frame_arena.allocator(), translated("Deploy \u{201c}{name}\u{201d} to Publr Cloud"), .{
         .name = deploy_site,
@@ -2445,7 +2407,7 @@ fn deployState(fields: *[2]sheet.Field) sheet.State {
         .description = desc,
         .fields = fields[0..1],
         .primary = translated("Deploy"),
-        .primary_enabled = availability == .available,
+        .primary_enabled = valid,
         .busy = if (deploy_job != null) deployBusyText() else sheet_busy,
         .hover = sheet_hover,
         .window_width = @floatCast(size.w),
@@ -2453,8 +2415,20 @@ fn deployState(fields: *[2]sheet.Field) sheet.State {
     };
 }
 
+/// Empty (made from the name), or lowercase letters, digits and single dashes inside.
+fn deployAddressValid(typed: []const u8) bool {
+    if (typed.len == 0) return true;
+    if (typed.len > 56 or typed[0] == '-' or typed[typed.len - 1] == '-') return false;
+    if (std.mem.indexOf(u8, typed, "--") != null) return false;
+    for (typed) |c| switch (c) {
+        'a'...'z', '0'...'9', '-' => {},
+        else => return false,
+    };
+    return true;
+}
+
 fn startDeploy() void {
-    if (sheet_busy != null or deploy_job != null or availability != .available) return;
+    if (sheet_busy != null or deploy_job != null or !deployAddressValid(address_field.value())) return;
     const token = cloud.token orelse return;
     if (cloud.spaces.len == 0) return;
     const job = gpa.create(deploying.Job) catch return;
@@ -2482,7 +2456,10 @@ fn startDeploy() void {
     job.token = a.dupe(u8, token) catch return;
     job.space = a.dupe(u8, cloud.spaces[0].slug) catch return;
     job.name = a.dupe(u8, deploy_site) catch return;
-    job.slug = a.dupe(u8, address_field.value()) catch return;
+    var made: [64]u8 = undefined;
+    const typed = address_field.value();
+    const base_slug = if (typed.len > 0) typed else slugify(&made, deploy_site);
+    job.slug = std.fmt.allocPrint(a, "{s}-{s}", .{ base_slug, &new_suffix }) catch return;
     deploy_progress = .{};
     deploy_job = job;
     sheet_error = null;
