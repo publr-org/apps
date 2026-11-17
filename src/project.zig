@@ -135,6 +135,9 @@ pub const Target = union(enum) {
     open_browser,
     /// The sidebar folded to a strip, or unfolded.
     fold,
+    /// The address bar's Back and Forward.
+    back,
+    forward,
     /// Advanced, at the details' foot: fold or unfold it.
     advanced,
     /// Under Advanced: a build of Publr for this project, or its own version again.
@@ -187,6 +190,11 @@ pub const State = struct {
     location: []const u8 = "",
     /// The sidebar is folded to a strip.
     folded: bool = false,
+    /// The page is one of the project's own (not a page elsewhere a link loaded).
+    own_page: bool = true,
+    /// The view's history has a page before this one, or after it.
+    can_back: bool = false,
+    can_forward: bool = false,
     /// How far Overview is scrolled.
     scroll: f32,
     page: Page,
@@ -639,6 +647,8 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     }
     if (s.page != .overview) {
         if (barAdminRect(s, u).contains(x, y)) return .{ .side = .admin };
+        if (s.can_back and backRect(s).contains(x, y)) return .back;
+        if (s.can_forward and forwardRect(s).contains(x, y)) return .forward;
         return if (barBrowserRect(s, u).contains(x, y)) .open_browser else .none;
     }
     if (moreRect(s).contains(x, y)) return .more;
@@ -708,6 +718,27 @@ fn addressBar(s: State) ui.Rect {
     };
 }
 
+/// Back and Forward, at the address bar's start.
+fn backRect(s: State) ui.Rect {
+    const bar = addressBar(s);
+    return .{
+        .x = bar.x + 8,
+        .y = bar.y + (bar.h - 30) / 2,
+        .w = 30,
+        .h = 30,
+    };
+}
+
+fn forwardRect(s: State) ui.Rect {
+    const back = backRect(s);
+    return .{
+        .x = back.x + back.w + 2,
+        .y = back.y,
+        .w = back.w,
+        .h = back.h,
+    };
+}
+
 /// Admin, left of Open in browser: the project's admin, chosen while it shows.
 fn barAdminRect(s: State, u: *ui.Ui) ui.Rect {
     const browser = barBrowserRect(s, u);
@@ -741,40 +772,35 @@ fn drawAddressBar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .w = bar.w,
         .h = 1,
     }, t.border, 0);
+    const back = backRect(s);
+    const forward = forwardRect(s);
+    for ([_]struct { ui.Rect, []const u8, bool, Target }{
+        .{ back, icons.chevron_left, s.can_back, .back },
+        .{ forward, icons.chevron_right, s.can_forward, .forward },
+    }) |b| {
+        if (b[2] and same(s.hover, b[3])) try u.rect(b[0], t.hover, 8);
+        try u.icon(centred(b[0], 16), b[1], if (b[2]) t.text else t.text3);
+    }
     const where = if (s.kind == .local) translated("On this Mac") else translated("On Cloud");
     const pill_style: ui.TextStyle = .{
         .size = 12,
         .weight = 500,
     };
+    // Only the project's own pages say where they are; a page elsewhere has no such place.
     const pill: ui.Rect = .{
-        .x = bar.x + 12,
+        .x = forward.x + forward.w + 8,
         .y = bar.y + (bar.h - 24) / 2,
-        .w = u.measure(where, pill_style) + 36,
+        .w = if (s.own_page) u.measure(where, pill_style) + 36 else 0,
         .h = 24,
     };
-    try u.rect(pill, t.selected, 12);
-    try u.icon(.{
-        .x = pill.x + 9,
-        .y = pill.y + 5,
-        .w = 14,
-        .h = 14,
-    }, if (s.kind == .local) icons.device_desktop else icons.globe, t.text);
-    try u.text(.{
-        .x = pill.x + 27,
-        .y = pill.y,
-        .w = pill.w - 30,
-        .h = pill.h,
-    }, where, .{
-        .size = pill_style.size,
-        .weight = pill_style.weight,
-        .color = t.text,
-    });
+    if (s.own_page) try drawPill(u, t, pill, where, s.kind == .local, pill_style);
     const button = barBrowserRect(s, u);
     const admin = barAdminRect(s, u);
+    const box_x = if (s.own_page) pill.x + pill.w + 8 else pill.x;
     const box: ui.Rect = .{
-        .x = pill.x + pill.w + 8,
+        .x = box_x,
         .y = bar.y + 7,
-        .w = admin.x - 8 - (pill.x + pill.w + 8),
+        .w = admin.x - 8 - box_x,
         .h = bar.h - 14,
     };
     try u.box(box, .{
@@ -792,6 +818,26 @@ fn drawAddressBar(u: *ui.Ui, s: State, t: *const Theme) !void {
     });
     try withIconOn(u, t, admin, icons.settings, translated("Admin"), same(s.hover, .{ .side = .admin }), s.page == .admin);
     try withIcon(u, t, button, icons.external, browserLabel(), same(s.hover, .open_browser));
+}
+
+fn drawPill(u: *ui.Ui, t: *const Theme, pill: ui.Rect, where: []const u8, local: bool, pill_style: ui.TextStyle) !void {
+    try u.rect(pill, t.selected, 12);
+    try u.icon(.{
+        .x = pill.x + 9,
+        .y = pill.y + 5,
+        .w = 14,
+        .h = 14,
+    }, if (local) icons.device_desktop else icons.globe, t.text);
+    try u.text(.{
+        .x = pill.x + 27,
+        .y = pill.y,
+        .w = pill.w - 30,
+        .h = pill.h,
+    }, where, .{
+        .size = pill_style.size,
+        .weight = pill_style.weight,
+        .color = t.text,
+    });
 }
 
 // The sidebar.

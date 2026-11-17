@@ -1281,8 +1281,60 @@ const location_script =
     \\  addEventListener('popstate', say);
     \\  addEventListener('hashchange', say);
     \\  say();
+    \\  // A link to another address: Desktop says whether it is the project's (it loads here)
+    \\  // or elsewhere (the person's browser). Same-address links are the page's own.
+    \\  addEventListener('click', (e) => {
+    \\    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    \\    const a = e.target.closest && e.target.closest('a[href]');
+    \\    if (!a || (a.target && a.target !== '_self')) return;
+    \\    const url = new URL(a.href, location.href);
+    \\    if (!/^https?:$/.test(url.protocol) || url.origin === location.origin) return;
+    \\    e.preventDefault();
+    \\    webkit.messageHandlers.native.postMessage('desktop:link ' + url.href);
+    \\  }, true);
     \\})();
 ;
+
+const link_message = "desktop:link ";
+
+/// `host[:port]` of an address.
+fn authorityOf(address: []const u8) []const u8 {
+    const rest = if (std.mem.indexOf(u8, address, "://")) |i| address[i + 3 ..] else address;
+    const end = std.mem.indexOfAny(u8, rest, "/?#") orelse rest.len;
+    return rest[0..end];
+}
+
+/// Whether `address` is one of the project's own: its site, its admin, a copy of it on
+/// Cloud (`<slug>--<copy>`), or on this Mac its site's address with a name in front
+/// (`admin.localhost:8108`).
+fn projectsOwn(pt: *const ProjectTab, address: []const u8) bool {
+    const there = authorityOf(address);
+    if (there.len == 0) return false;
+    if (pt.live.len > 0) {
+        const live = authorityOf(pt.live);
+        if (std.mem.eql(u8, there, live)) return true;
+        const dot = std.mem.indexOfScalar(u8, live, '.') orelse return false;
+        return std.mem.startsWith(u8, there, live[0..dot]) and
+            std.mem.startsWith(u8, there[dot..], "--") and
+            std.mem.endsWith(u8, there, live[dot..]);
+    }
+    const site = sites.find(pt.folder) orelse return false;
+    const own = authorityOf(site.address);
+    if (std.mem.eql(u8, there, own)) return true;
+    return there.len > own.len and std.mem.endsWith(u8, there, own) and there[there.len - own.len - 1] == '.';
+}
+
+/// A link to another address, clicked in a tab: the project's own load there; any other opens
+/// in the person's browser.
+fn followLink(web: *native.WebView, url: []const u8) void {
+    var buf: [4096]u8 = undefined;
+    const link = std.fmt.bufPrintSentinel(&buf, "{s}", .{url}, 0) catch return;
+    for (tabs.items) |t| if (t.web == web) {
+        if (t.project) |pt| if (projectsOwn(pt, url)) return web.loadUrl(link);
+        break;
+    };
+    native.openInBrowser(link);
+}
 
 /// An app's picture's name: its project's folder and its own.
 fn appThumbName(buf: []u8, folder: []const u8, app: []const u8) []const u8 {
@@ -1584,6 +1636,7 @@ fn onMessage(_: ?*anyopaque, web: *native.WebView, text: []const u8) void {
     if (thumbs.onMessage(web, text)) return;
     // The page moved: the address bar says where it is now.
     if (std.mem.eql(u8, text, location_message)) return redrawAll();
+    if (std.mem.startsWith(u8, text, link_message)) return followLink(web, text[link_message.len..]);
     if (timing_site == null) return;
     std.debug.print("page {s}\n", .{text});
     // The sign-in link lands on /admin first; then each page in turn.
@@ -2479,6 +2532,9 @@ fn projectPage(i: usize) project.State {
         .menu_open = pt.menu_open,
         .copied = pt.copied,
         .location = shownAddress(t.web.address()),
+        .own_page = t.web.address().len == 0 or projectsOwn(pt, t.web.address()),
+        .can_back = t.web.canGoBack(),
+        .can_forward = t.web.canGoForward(),
         .folded = side_folded,
         .scroll = pt.scroll,
         .page = pt.page,
@@ -2507,6 +2563,8 @@ fn clickProject(i: usize, target: project.Target) void {
         },
         .open_browser => openInBrowser(t),
         .fold => foldSidebar(!side_folded),
+        .back => t.web.goBack(),
+        .forward => t.web.goForward(),
         .advanced => pt.advanced = !pt.advanced,
         .choose_build => choosePublr(pt.folder, false),
         .use_pin => choosePublr(pt.folder, true),
@@ -2903,6 +2961,11 @@ fn onMenu(_: ?*anyopaque, tag: u32) void {
 /// admin stays the admin's, a page of the site the site's (the sign-on takes it on there).
 fn openInBrowser(t: Tab) void {
     const address = t.web.address();
+    // A page elsewhere (a link that loaded here): that page itself.
+    if (t.project) |pt| if (address.len > 0 and !projectsOwn(pt, address)) {
+        var outside: [4096]u8 = undefined;
+        return native.openInBrowser(std.fmt.bufPrintSentinel(&outside, "{s}", .{address}, 0) catch return);
+    };
     var path: []const u8 = "/";
     if (std.mem.indexOf(u8, address, "://")) |scheme| {
         if (std.mem.indexOfScalarPos(u8, address, scheme + 3, '/')) |slash| path = address[slash..];
