@@ -2565,6 +2565,7 @@ fn clickProject(i: usize, target: project.Target) void {
         .fold => foldSidebar(!side_folded),
         .back => t.web.goBack(),
         .forward => t.web.goForward(),
+        .reload => t.web.reload(),
         .advanced => pt.advanced = !pt.advanced,
         .choose_build => choosePublr(pt.folder, false),
         .use_pin => choosePublr(pt.folder, true),

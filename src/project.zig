@@ -135,9 +135,10 @@ pub const Target = union(enum) {
     open_browser,
     /// The sidebar folded to a strip, or unfolded.
     fold,
-    /// The address bar's Back and Forward.
+    /// The address bar's Back, Forward and Reload.
     back,
     forward,
+    reload,
     /// Advanced, at the details' foot: fold or unfold it.
     advanced,
     /// Under Advanced: a build of Publr for this project, or its own version again.
@@ -649,6 +650,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
         if (barAdminRect(s, u).contains(x, y)) return .{ .side = .admin };
         if (s.can_back and backRect(s).contains(x, y)) return .back;
         if (s.can_forward and forwardRect(s).contains(x, y)) return .forward;
+        if (reloadRect(s).contains(x, y)) return .reload;
         return if (barBrowserRect(s, u).contains(x, y)) .open_browser else .none;
     }
     if (moreRect(s).contains(x, y)) return .more;
@@ -739,6 +741,16 @@ fn forwardRect(s: State) ui.Rect {
     };
 }
 
+fn reloadRect(s: State) ui.Rect {
+    const forward = forwardRect(s);
+    return .{
+        .x = forward.x + forward.w + 2,
+        .y = forward.y,
+        .w = forward.w,
+        .h = forward.h,
+    };
+}
+
 /// Admin, left of Open in browser: the project's admin, chosen while it shows.
 fn barAdminRect(s: State, u: *ui.Ui) ui.Rect {
     const browser = barBrowserRect(s, u);
@@ -774,9 +786,11 @@ fn drawAddressBar(u: *ui.Ui, s: State, t: *const Theme) !void {
     }, t.border, 0);
     const back = backRect(s);
     const forward = forwardRect(s);
+    const reload = reloadRect(s);
     for ([_]struct { ui.Rect, []const u8, bool, Target }{
         .{ back, icons.chevron_left, s.can_back, .back },
         .{ forward, icons.chevron_right, s.can_forward, .forward },
+        .{ reload, icons.sync, true, .reload },
     }) |b| {
         if (b[2] and same(s.hover, b[3])) try u.rect(b[0], t.hover, 8);
         try u.icon(centred(b[0], 16), b[1], if (b[2]) t.text else t.text3);
@@ -788,7 +802,7 @@ fn drawAddressBar(u: *ui.Ui, s: State, t: *const Theme) !void {
     };
     // Only the project's own pages say where they are; a page elsewhere has no such place.
     const pill: ui.Rect = .{
-        .x = forward.x + forward.w + 8,
+        .x = reload.x + reload.w + 8,
         .y = bar.y + (bar.h - 24) / 2,
         .w = if (s.own_page) u.measure(where, pill_style) + 36 else 0,
         .h = 24,
