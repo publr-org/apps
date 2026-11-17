@@ -42,7 +42,6 @@ const side_head: f32 = 76;
 const side_thumb_ratio: f32 = 0.52;
 const side_label: f32 = 38;
 const side_gap: f32 = 12;
-const side_foot: f32 = 52;
 
 const content_max: f32 = 1080;
 const pad: f32 = 40;
@@ -262,21 +261,6 @@ fn foldRect(s: State) ui.Rect {
 /// The sidebar's cards: Overview, then each app.
 fn sidePage(k: usize) Page {
     return if (k == 0) .overview else .{ .app = k - 1 };
-}
-
-fn adminRowRect(s: State) ui.Rect {
-    if (s.folded) return .{
-        .x = (sidebar_folded - folded_tile) / 2,
-        .y = s.height - side_foot + (side_foot - folded_tile) / 2,
-        .w = folded_tile,
-        .h = folded_tile,
-    };
-    return .{
-        .x = side_pad - 4,
-        .y = s.height - side_foot + 8,
-        .w = sidebar_width - 2 * (side_pad - 4),
-        .h = side_foot - 16,
-    };
 }
 
 // Overview's layout, top to bottom, beside the sidebar.
@@ -651,10 +635,10 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (x < sideW(s)) {
         if (foldRect(s).contains(x, y)) return .fold;
         for (0..s.apps.len + 1) |k| if (sideCardRect(s, k).contains(x, y)) return .{ .side = sidePage(k) };
-        if (adminRowRect(s).contains(x, y)) return .{ .side = .admin };
         return .none;
     }
     if (s.page != .overview) {
+        if (barAdminRect(s, u).contains(x, y)) return .{ .side = .admin };
         return if (barBrowserRect(s, u).contains(x, y)) .open_browser else .none;
     }
     if (moreRect(s).contains(x, y)) return .more;
@@ -687,8 +671,13 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
 
 /// A bordered button, its icon before its label.
 fn withIcon(u: *ui.Ui, t: *const Theme, r: ui.Rect, icon: []const u8, label: []const u8, hovered: bool) !void {
+    return withIconOn(u, t, r, icon, label, hovered, false);
+}
+
+/// The same, filled while what it opens shows.
+fn withIconOn(u: *ui.Ui, t: *const Theme, r: ui.Rect, icon: []const u8, label: []const u8, hovered: bool, on: bool) !void {
     try u.box(r, .{
-        .fill = if (hovered) t.hover else t.bg,
+        .fill = if (on) t.selected else if (hovered) t.hover else t.bg,
         .border = t.input,
         .radius = 8,
     });
@@ -716,6 +705,18 @@ fn addressBar(s: State) ui.Rect {
         .y = s.top,
         .w = s.width - sideW(s),
         .h = address_bar_height,
+    };
+}
+
+/// Admin, left of Open in browser: the project's admin, chosen while it shows.
+fn barAdminRect(s: State, u: *ui.Ui) ui.Rect {
+    const browser = barBrowserRect(s, u);
+    const w = u.measure(translated("Admin"), button_text) + 36 + 16;
+    return .{
+        .x = browser.x - 8 - w,
+        .y = browser.y,
+        .w = w,
+        .h = browser.h,
     };
 }
 
@@ -769,10 +770,11 @@ fn drawAddressBar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .color = t.text,
     });
     const button = barBrowserRect(s, u);
+    const admin = barAdminRect(s, u);
     const box: ui.Rect = .{
         .x = pill.x + pill.w + 8,
         .y = bar.y + 7,
-        .w = button.x - 8 - (pill.x + pill.w + 8),
+        .w = admin.x - 8 - (pill.x + pill.w + 8),
         .h = bar.h - 14,
     };
     try u.box(box, .{
@@ -788,6 +790,7 @@ fn drawAddressBar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .size = 13,
         .color = t.text2,
     });
+    try withIconOn(u, t, admin, icons.settings, translated("Admin"), same(s.hover, .{ .side = .admin }), s.page == .admin);
     try withIcon(u, t, button, icons.external, browserLabel(), same(s.hover, .open_browser));
 }
 
@@ -832,7 +835,7 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .x = 0,
         .y = list_top,
         .w = w,
-        .h = s.height - side_foot - list_top,
+        .h = s.height - list_top,
     });
     try homeRow(u, s, t);
     // Folded, a line between Project home and the apps.
@@ -858,32 +861,6 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
     for (1..s.apps.len + 1) |k| try sideCard(u, s, t, k);
     try u.endClip();
 
-    try u.rect(.{
-        .x = 0,
-        .y = s.height - side_foot,
-        .w = w,
-        .h = 1,
-    }, t.border, 0);
-    const admin = adminRowRect(s);
-    const on = s.page == .admin;
-    try sideButton(u, s, t, admin, on, same(s.hover, .{ .side = .admin }));
-    if (s.folded) return u.icon(centred(admin, 16), icons.settings, if (on) t.text else t.text2);
-    try u.icon(.{
-        .x = admin.x + 10,
-        .y = admin.y + (admin.h - 16) / 2,
-        .w = 16,
-        .h = 16,
-    }, icons.settings, if (on) t.text else t.text2);
-    try u.text(.{
-        .x = admin.x + 36,
-        .y = admin.y,
-        .w = admin.w - 46,
-        .h = admin.h,
-    }, translated("Admin"), .{
-        .size = 13,
-        .weight = 500,
-        .color = if (on) t.text else t.text2,
-    });
 }
 
 /// A sidebar button's ground: chosen, pointed at, or (folded, where only icons show) faint,
