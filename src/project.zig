@@ -32,7 +32,7 @@ const home_row: f32 = 36;
 const apps_label: f32 = 30;
 /// A folded sidebar's buttons and app pictures.
 const folded_tile: f32 = 40;
-const folded_gap: f32 = 8;
+const folded_gap: f32 = 4;
 /// Over the site or admin: where the page is (this Mac or Cloud), its address, and Open in
 /// browser. The web view lies under it.
 pub const address_bar_height: f32 = 44;
@@ -810,7 +810,7 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
     }, t.border, 0);
 
     const fold = foldRect(s);
-    if (same(s.hover, .fold)) try u.rect(fold, t.hover, 8);
+    try sideButton(u, s, t, fold, false, same(s.hover, .fold));
     try u.icon(centred(fold, 16), if (s.folded) icons.chevron_right else icons.chevron_left, t.text2);
 
     if (!s.folded) {
@@ -866,7 +866,7 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
     }, t.border, 0);
     const admin = adminRowRect(s);
     const on = s.page == .admin;
-    if (on) try u.rect(admin, t.selected, 8) else if (same(s.hover, .{ .side = .admin })) try u.rect(admin, t.hover, 8);
+    try sideButton(u, s, t, admin, on, same(s.hover, .{ .side = .admin }));
     if (s.folded) return u.icon(centred(admin, 16), icons.settings, if (on) t.text else t.text2);
     try u.icon(.{
         .x = admin.x + 10,
@@ -886,11 +886,22 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
     });
 }
 
+/// A sidebar button's ground: chosen, pointed at, or (folded, where only icons show) faint,
+/// so each reads as a button.
+fn sideButton(u: *ui.Ui, s: State, t: *const Theme, r: ui.Rect, on: bool, hovered: bool) !void {
+    if (on) return u.rect(r, t.selected, 8);
+    if (hovered) return u.rect(r, t.hover, 8);
+    if (!s.folded) return;
+    var faint = t.hover;
+    faint.a *= 0.5;
+    try u.rect(r, faint, 8);
+}
+
 /// Project home: the project's own page, a row with a house (an icon alone, folded).
 fn homeRow(u: *ui.Ui, s: State, t: *const Theme) !void {
     const r = sideCardRect(s, 0);
     const on = s.page == .overview;
-    if (on) try u.rect(r, t.selected, 8) else if (same(s.hover, .{ .side = .overview })) try u.rect(r, t.hover, 8);
+    try sideButton(u, s, t, r, on, same(s.hover, .{ .side = .overview }));
     const color = if (on) t.text else t.text2;
     if (s.folded) return u.icon(centred(r, 16), icons.home, color);
     try u.icon(.{
