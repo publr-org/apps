@@ -1164,6 +1164,7 @@ fn openProject(space: usize, k: usize) void {
 fn openProjectTab(name: []const u8, folder: []const u8, live: []const u8, space: []const u8) void {
     if (projectTabOf(folder, live)) |i| return showTab(i);
     const web = window.addWebView() catch return;
+    web.addUserScript(location_script);
     const pt = gpa.create(ProjectTab) catch return;
     pt.* = .{
         .arena = .init(gpa),
@@ -1192,6 +1193,27 @@ fn openProjectTab(name: []const u8, folder: []const u8, live: []const u8, space:
     }) catch return;
     showTab(tabs.items.len - 1);
 }
+
+/// A one-time sign-on address is never shown: the page it leads to is.
+fn shownAddress(address: []const u8) []const u8 {
+    if (std.mem.indexOf(u8, address, "/auth/") != null) return "";
+    return address;
+}
+
+/// A page that moves (a load, a link, the history) says so, for the address bar.
+const location_message = "desktop:location";
+const location_script =
+    \\(() => {
+    \\  const say = () => webkit.messageHandlers.native.postMessage('desktop:location');
+    \\  for (const name of ['pushState', 'replaceState']) {
+    \\    const original = history[name];
+    \\    history[name] = function () { const r = original.apply(this, arguments); say(); return r; };
+    \\  }
+    \\  addEventListener('popstate', say);
+    \\  addEventListener('hashchange', say);
+    \\  say();
+    \\})();
+;
 
 /// An app's picture's name: its project's folder and its own.
 fn appThumbName(buf: []u8, folder: []const u8, app: []const u8) []const u8 {
@@ -1491,6 +1513,8 @@ fn act(name: []const u8, tag: u32) void {
 /// The page sent a message (only the timing mode's pages do).
 fn onMessage(_: ?*anyopaque, web: *native.WebView, text: []const u8) void {
     if (thumbs.onMessage(web, text)) return;
+    // The page moved: the address bar says where it is now.
+    if (std.mem.eql(u8, text, location_message)) return redrawAll();
     if (timing_site == null) return;
     std.debug.print("page {s}\n", .{text});
     // The sign-in link lands on /admin first; then each page in turn.
@@ -2286,7 +2310,7 @@ fn showTab(i: usize) void {
     // the strip.
     if (t.project) |pt| {
         // A project's Overview and sidebar are drawn here; its other pages lie beside them.
-        if (pt.page == .overview) window.setBarHeight(window.size().h + 10_000) else window.setWebArea(project.sidebar_width, bar.height);
+        if (pt.page == .overview) window.setBarHeight(window.size().h + 10_000) else window.setWebArea(project.sidebar_width, bar.height + project.address_bar_height);
     } else window.setBarHeight(bar.height);
     redrawAll();
 }
@@ -2352,6 +2376,7 @@ fn projectPage(i: usize) project.State {
         .apps = pt.apps,
         .menu_open = pt.menu_open,
         .copied = pt.copied,
+        .location = shownAddress(t.web.address()),
         .scroll = pt.scroll,
         .page = pt.page,
         .hover = switch (hover) {
@@ -2377,6 +2402,7 @@ fn clickProject(i: usize, target: project.Target) void {
             copyPath(pt.folder);
             pt.copied = true;
         },
+        .open_browser => openInBrowser(t),
         .advanced => pt.advanced = !pt.advanced,
         .choose_build => choosePublr(pt.folder, false),
         .use_pin => choosePublr(pt.folder, true),

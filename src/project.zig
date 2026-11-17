@@ -14,6 +14,9 @@ const Theme = @import("theme.zig").Theme;
 const centred = @import("bar.zig").centred;
 
 pub const sidebar_width: f32 = 272;
+/// Over the site or admin: where the page is (this Mac or Cloud), its address, and Open in
+/// browser. The web view lies under it.
+pub const address_bar_height: f32 = 44;
 const side_pad: f32 = 14;
 const side_head: f32 = 76;
 /// A sidebar card's picture: the top of the site, wider than tall.
@@ -110,6 +113,8 @@ pub const Target = union(enum) {
     finder,
     /// The folder's path to the clipboard, to open it in Terminal.
     copy_path,
+    /// The page shown (the site, on Overview), in the person's browser.
+    open_browser,
     /// Advanced, at the details' foot: fold or unfold it.
     advanced,
     /// Under Advanced: a build of Publr for this project, or its own version again.
@@ -158,6 +163,8 @@ pub const State = struct {
     menu_open: bool,
     /// The folder's path was just copied: its button says so.
     copied: bool = false,
+    /// The address the site or admin page is at, for the address bar.
+    location: []const u8 = "",
     /// How far Overview is scrolled.
     scroll: f32,
     page: Page,
@@ -262,9 +269,23 @@ fn cloneLabel(s: State) []const u8 {
     return if (s.cloning) "Cloning\u{2026}" else "Clone to this Mac";
 }
 
+const browser_label = "Open in browser";
+
+/// Open in browser, its icon before its label.
+fn browserRect(s: State, u: *ui.Ui) ui.Rect {
+    const w = u.measure(browser_label, button_text) + 32 + 22;
+    const site = siteRect(s, u);
+    return .{
+        .x = site.x - 8 - w,
+        .y = site.y,
+        .w = w,
+        .h = button_height,
+    };
+}
+
 fn cloneRect(s: State, u: *ui.Ui) ui.Rect {
     const w = u.measure(cloneLabel(s), button_text) + 32;
-    const site = siteRect(s, u);
+    const site = browserRect(s, u);
     return .{
         .x = site.x - 8 - w,
         .y = site.y,
@@ -559,8 +580,11 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
         if (adminRowRect(s).contains(x, y)) return .{ .side = .admin };
         return .none;
     }
-    if (s.page != .overview) return .none;
+    if (s.page != .overview) {
+        return if (barBrowserRect(s, u).contains(x, y)) .open_browser else .none;
+    }
     if (moreRect(s).contains(x, y)) return .more;
+    if (browserRect(s, u).contains(x, y)) return .open_browser;
     if (adminRect(s, u).contains(x, y)) return .admin;
     if (siteRect(s, u).contains(x, y)) return .site;
     if (s.kind == .cloud and !s.cloning and cloneRect(s, u).contains(x, y)) return .clone;
@@ -583,8 +607,114 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
 }
 
 pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
-    if (s.page == .overview) try drawOverview(u, s, t);
+    if (s.page == .overview) try drawOverview(u, s, t) else try drawAddressBar(u, s, t);
     try drawSidebar(u, s, t);
+}
+
+/// A bordered button, its icon before its label.
+fn withIcon(u: *ui.Ui, t: *const Theme, r: ui.Rect, icon: []const u8, label: []const u8, hovered: bool) !void {
+    try u.box(r, .{
+        .fill = if (hovered) t.hover else t.bg,
+        .border = t.input,
+        .radius = 8,
+    });
+    try u.icon(.{
+        .x = r.x + 14,
+        .y = r.y + (r.h - 16) / 2,
+        .w = 16,
+        .h = 16,
+    }, icon, t.text);
+    try u.text(.{
+        .x = r.x + 36,
+        .y = r.y,
+        .w = r.w - 50,
+        .h = r.h,
+    }, label, .{
+        .size = button_text.size,
+        .weight = button_text.weight,
+        .color = t.text,
+    });
+}
+
+fn addressBar(s: State) ui.Rect {
+    return .{
+        .x = sidebar_width,
+        .y = s.top,
+        .w = s.width - sidebar_width,
+        .h = address_bar_height,
+    };
+}
+
+fn barBrowserRect(s: State, u: *ui.Ui) ui.Rect {
+    const bar = addressBar(s);
+    const w = u.measure(browser_label, button_text) + 36 + 16;
+    return .{
+        .x = bar.x + bar.w - 8 - w,
+        .y = bar.y + (bar.h - 30) / 2,
+        .w = w,
+        .h = 30,
+    };
+}
+
+/// Where the page is: a pill, On this Mac or On Cloud; its address; Open in browser.
+fn drawAddressBar(u: *ui.Ui, s: State, t: *const Theme) !void {
+    const bar = addressBar(s);
+    try u.rect(bar, t.bg, 0);
+    try u.rect(.{
+        .x = bar.x,
+        .y = bar.y + bar.h - 1,
+        .w = bar.w,
+        .h = 1,
+    }, t.border, 0);
+    const where = if (s.kind == .local) "On this Mac" else "On Cloud";
+    const pill_style: ui.TextStyle = .{
+        .size = 12,
+        .weight = 500,
+    };
+    const pill: ui.Rect = .{
+        .x = bar.x + 12,
+        .y = bar.y + (bar.h - 24) / 2,
+        .w = u.measure(where, pill_style) + 36,
+        .h = 24,
+    };
+    try u.rect(pill, t.selected, 12);
+    try u.icon(.{
+        .x = pill.x + 9,
+        .y = pill.y + 5,
+        .w = 14,
+        .h = 14,
+    }, if (s.kind == .local) icons.device_desktop else icons.globe, t.text);
+    try u.text(.{
+        .x = pill.x + 27,
+        .y = pill.y,
+        .w = pill.w - 30,
+        .h = pill.h,
+    }, where, .{
+        .size = pill_style.size,
+        .weight = pill_style.weight,
+        .color = t.text,
+    });
+    const button = barBrowserRect(s, u);
+    const box: ui.Rect = .{
+        .x = pill.x + pill.w + 8,
+        .y = bar.y + 7,
+        .w = button.x - 8 - (pill.x + pill.w + 8),
+        .h = bar.h - 14,
+    };
+    try u.box(box, .{
+        .fill = t.hover,
+        .radius = 8,
+    });
+    try u.text(.{
+        .x = box.x + 10,
+        .y = box.y,
+        .w = box.w - 20,
+        .h = box.h,
+    }, s.location, .{
+        .size = 13,
+        .color = t.text2,
+    });
+    try withIcon(u, t, button, icons.external, browser_label, same(s.hover, .open_browser));
 }
 
 // The sidebar.
@@ -793,7 +923,7 @@ fn drawOverview(u: *ui.Ui, s: State, t: *const Theme) !void {
 
 fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
     const x = contentX(s);
-    const site = if (s.kind == .cloud) cloneRect(s, u) else siteRect(s, u);
+    const site = if (s.kind == .cloud) cloneRect(s, u) else browserRect(s, u);
     try u.text(.{
         .x = x,
         .y = headTop(s),
@@ -832,6 +962,7 @@ fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
     }, t.text2, 0);
 
     if (s.kind == .cloud) try secondary(u, t, site, cloneLabel(s), same(s.hover, .clone));
+    try withIcon(u, t, browserRect(s, u), icons.external, browser_label, same(s.hover, .open_browser));
     try secondary(u, t, siteRect(s, u), siteLabel(s), same(s.hover, .site));
     const admin = adminRect(s, u);
     var fill = t.primary;
