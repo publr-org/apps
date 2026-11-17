@@ -2,7 +2,8 @@
 //! First, Publr Cloud, recommended: what it gives, that it is free, and the way in, with using
 //! Publr without Cloud under it. Without Cloud, two ways side by side: each project's admin
 //! account made by hand, or one account for all projects; that one asks for its email on a
-//! step of its own. Layout and hit testing together.
+//! step of its own. Last, the AI tools on this Mac, each connected with one click. Layout and
+//! hit testing together.
 
 const std = @import("std");
 const native = @import("native");
@@ -10,11 +11,13 @@ const ui = @import("ui");
 const icons = @import("publr_icons");
 const Theme = @import("theme.zig").Theme;
 const mark = @import("mark.zig");
+const ai_tools = @import("ai_tools.zig");
 
 pub const Step = enum {
     start,
     without_cloud,
     email,
+    tools,
 };
 
 pub const Choice = enum {
@@ -35,6 +38,8 @@ pub const State = struct {
     signing_in: bool,
     /// Why the last sign-in did not work ("denied"), or null.
     cloud_problem: ?[]const u8,
+    /// The AI tools, one row each.
+    tools: []const ai_tools.Row = &.{},
     hover: Target,
 };
 
@@ -48,7 +53,28 @@ pub const Target = enum {
     field,
     back,
     confirm,
+    tool_claude,
+    tool_codex,
+    tool_cursor,
 };
+
+fn toolTarget(tool: ai_tools.Tool) Target {
+    return switch (tool) {
+        .claude => .tool_claude,
+        .codex => .tool_codex,
+        .cursor => .tool_cursor,
+    };
+}
+
+/// The tool a target connects, or null.
+pub fn toolOf(target: Target) ?ai_tools.Tool {
+    return switch (target) {
+        .tool_claude => .claude,
+        .tool_codex => .codex,
+        .tool_cursor => .cursor,
+        else => null,
+    };
+}
 
 const Benefit = struct {
     icon: []const u8,
@@ -105,7 +131,9 @@ const problem_step: f32 = 30;
 const tile_height: f32 = 196;
 const tile_gap: f32 = 12;
 const field_height: f32 = 40;
+const tool_row_height: f32 = 68;
 const link_label = "How accounts work";
+const tools_link_label = "How building with AI works";
 /// Publr's mark, and the room under it.
 const mark_size: f32 = 40;
 const mark_step: f32 = mark_size + 20;
@@ -129,6 +157,43 @@ fn bodyHeight(s: State) f32 {
         .start => panelHeight(s) + 12 + button_height,
         .without_cloud => tile_height + 24 + button_height,
         .email => 22 + field_height + 32 + button_height,
+        .tools => toolsHeight(s) + 24 + button_height,
+    };
+}
+
+fn toolsHeight(s: State) f32 {
+    return @as(f32, @floatFromInt(s.tools.len)) * tool_row_height;
+}
+
+fn toolRow(s: State, i: usize) ui.Rect {
+    return .{
+        .x = left(s),
+        .y = bodyTop(s) + @as(f32, @floatFromInt(i)) * tool_row_height,
+        .w = width,
+        .h = tool_row_height,
+    };
+}
+
+fn toolButton(s: State, u: *ui.Ui, i: usize) ?ui.Rect {
+    const label = s.tools[i].button;
+    if (label.len == 0) return null;
+    const r = toolRow(s, i);
+    const w = u.measure(label, button_text) + 32;
+    return .{
+        .x = r.x + r.w - 20 - w,
+        .y = r.y + (r.h - 36) / 2,
+        .w = w,
+        .h = 36,
+    };
+}
+
+/// Continue, the whole width, under the tools.
+fn continueRect(s: State) ui.Rect {
+    return .{
+        .x = left(s),
+        .y = bodyTop(s) + bodyHeight(s) - button_height,
+        .w = width,
+        .h = button_height,
     };
 }
 
@@ -212,9 +277,17 @@ fn confirmRect(s: State) ui.Rect {
     };
 }
 
+fn linkLabel(s: State) []const u8 {
+    return if (s.step == .tools) tools_link_label else link_label;
+}
+
 fn linkRect(s: State, u: *ui.Ui) ui.Rect {
-    const above = if (s.step == .start) localRect(s) else backRect(s);
-    const w = u.measure(link_label, button_text);
+    const above = switch (s.step) {
+        .start => localRect(s),
+        .tools => continueRect(s),
+        else => backRect(s),
+    };
+    const w = u.measure(linkLabel(s), button_text);
     return .{
         .x = left(s) + (width - w) / 2,
         .y = above.y + above.h + 18,
@@ -229,6 +302,7 @@ pub fn ready(s: State) bool {
         .start => true,
         .without_cloud => s.choice != null,
         .email => s.email.value().len > 0 and s.problem == null,
+        .tools => true,
     };
 }
 
@@ -245,6 +319,10 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
             if (tileRect(s, .one_account).contains(x, y)) return .one_account;
         },
         .email => if (fieldRect(s).contains(x, y)) return .field,
+        .tools => {
+            for (s.tools, 0..) |tool, i| if (toolButton(s, u, i)) |b| if (b.contains(x, y)) return toolTarget(tool.tool);
+            return if (continueRect(s).contains(x, y)) .confirm else .none;
+        },
     }
     if (backRect(s).contains(x, y)) return .back;
     if (confirmRect(s).contains(x, y)) return .confirm;
@@ -272,6 +350,7 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme, window: *native.Window) !void 
         .start => .{ "Welcome to Publr Desktop", "Make websites and apps on your Mac, with the AI tool you already use." },
         .without_cloud => .{ "Without Publr Cloud", "How should your projects' admin accounts be made?" },
         .email => .{ "One account for all projects", "Every project you make gets an account with this email and opens with you signed in." },
+        .tools => .{ "Connect your AI tool", "Publr works inside the AI tool you use. Connect it once, for every project." },
     };
     const y = top(s) + mark_step;
     try u.text(.{
@@ -312,10 +391,14 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme, window: *native.Window) !void 
             try secondary(u, t, backRect(s), "Back", s.hover == .back);
             try primary(u, t, confirmRect(s), "Continue", s.hover == .confirm, ready(s));
         },
+        .tools => {
+            try drawTools(u, s, t);
+            try primary(u, t, continueRect(s), "Continue", s.hover == .confirm, true);
+        },
     }
 
     const link = linkRect(s, u);
-    try u.text(link, link_label, .{
+    try u.text(link, linkLabel(s), .{
         .size = button_text.size,
         .weight = button_text.weight,
         .color = t.text2,
@@ -422,6 +505,58 @@ fn drawTile(u: *ui.Ui, s: State, t: *const Theme, way: Way) !void {
         .color = t.text2,
         .truncate = false,
     });
+}
+
+/// The tools in one bordered list: each its name, how it stands, and Connect or a tick.
+fn drawTools(u: *ui.Ui, s: State, t: *const Theme) !void {
+    try u.box(.{
+        .x = left(s),
+        .y = bodyTop(s),
+        .w = width,
+        .h = toolsHeight(s),
+    }, .{
+        .fill = t.bg,
+        .border = t.border,
+        .radius = 14,
+    });
+    for (s.tools, 0..) |tool, i| {
+        const r = toolRow(s, i);
+        if (i > 0) try u.rect(.{
+            .x = r.x + 1,
+            .y = r.y,
+            .w = r.w - 2,
+            .h = 1,
+        }, t.border, 0);
+        try u.text(.{
+            .x = r.x + 20,
+            .y = r.y + 15,
+            .w = r.w - 200,
+            .h = 20,
+        }, tool.tool.name(), .{
+            .size = 15,
+            .weight = 600,
+            .color = t.text,
+        });
+        try u.text(.{
+            .x = r.x + 20,
+            .y = r.y + 37,
+            .w = r.w - 200,
+            .h = 18,
+        }, tool.line, .{
+            .size = 13,
+            .color = if (tool.connected) t.running else t.text2,
+        });
+        if (toolButton(s, u, i)) |b| {
+            try secondary(u, t, b, tool.button, s.hover == toolTarget(tool.tool));
+        } else if (tool.connected) {
+            try u.icon(.{
+                .x = r.x + r.w - 20 - 18,
+                .y = r.y + (r.h - 18) / 2,
+                .w = 18,
+                .h = 18,
+            }, icons.check, t.running);
+        }
+    }
 }
 
 fn drawEmail(u: *ui.Ui, s: State, t: *const Theme, window: *native.Window) !void {

@@ -1,7 +1,7 @@
 //! Settings: a page of Home's, beside its sidebar, set as Home's pages are (the bar with where
 //! you are, the page's title, then its sections). Where new sites go (the default folder),
 //! the other folders whose sites Desktop and `publr ls` show, the account email new sites
-//! get, and, folded under Advanced, the Publr build every project runs instead of its own
+//! get, the AI tools Publr is added to, and, folded under Advanced, the Publr build every project runs instead of its own
 //! version (one built from source).
 //! The same config the command reads (`publr config`). Layout and hit testing together.
 
@@ -9,6 +9,7 @@ const std = @import("std");
 const ui = @import("ui");
 const icons = @import("publr_icons");
 const Theme = @import("theme.zig").Theme;
+const ai_tools = @import("ai_tools.zig");
 
 const header_height: f32 = 48;
 const head_height: f32 = 100;
@@ -42,6 +43,8 @@ pub const State = struct {
     publr: ?[]const u8,
     /// Who every new site gets as its admin, as people read it ("Your Cloud account", an email).
     admin: []const u8,
+    /// The AI tools, one row each.
+    tools: []const ai_tools.Row,
     /// Advanced is unfolded.
     advanced: bool,
     /// Said in place of the buttons' note while something runs ("Choosing a folder…"), or
@@ -57,6 +60,7 @@ pub const Target = union(enum) {
     add_folder,
     remove_folder: usize,
     change_admin,
+    connect_tool: ai_tools.Tool,
     advanced,
     choose_publr,
     clear_publr,
@@ -113,12 +117,36 @@ fn adminChangeRect(s: State, u: *ui.Ui) ui.Rect {
     return rowButton(u, adminRow(s, u), change_label);
 }
 
-fn advancedRect(s: State, u: *ui.Ui) ui.Rect {
+fn toolsTitle(s: State, u: *ui.Ui) f32 {
     const admin = adminRow(s, u);
+    return admin.y + admin.h + section_gap;
+}
+
+/// Each tool's row: its name and how it stands, its button at the right end.
+const tool_row_height: f32 = 52;
+
+fn toolRow(s: State, u: *ui.Ui, i: usize) ui.Rect {
+    const c = column(s);
+    return .{
+        .x = c.x,
+        .y = toolsTitle(s, u) + title_step + hint_height + 6 + @as(f32, @floatFromInt(i)) * tool_row_height,
+        .w = c.w,
+        .h = tool_row_height,
+    };
+}
+
+fn toolButton(s: State, u: *ui.Ui, i: usize) ?ui.Rect {
+    const label = s.tools[i].button;
+    if (label.len == 0) return null;
+    return rowButton(u, toolRow(s, u, i), label);
+}
+
+fn advancedRect(s: State, u: *ui.Ui) ui.Rect {
+    const last = toolRow(s, u, s.tools.len);
     const c = column(s);
     return .{
         .x = c.x - 8,
-        .y = admin.y + admin.h + section_gap - 6,
+        .y = last.y + section_gap - 6,
         .w = c.w + 16,
         .h = 32,
     };
@@ -211,6 +239,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     for (0..s.folders.len) |i| if (removeRect(s, u, i).contains(x, y)) return .{ .remove_folder = i };
     if (addRect(s, u).contains(x, y)) return .add_folder;
     if (adminChangeRect(s, u).contains(x, y)) return .change_admin;
+    for (s.tools, 0..) |tool, i| if (toolButton(s, u, i)) |b| if (b.contains(x, y)) return .{ .connect_tool = tool.tool };
     if (advancedRect(s, u).contains(x, y)) return .advanced;
     if (!s.advanced) return .none;
     if (chooseRect(s, u).contains(x, y)) return .choose_publr;
@@ -266,6 +295,19 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
     try sectionTitle(u, t, c, newSitesTitle(s, u), "Default account email");
     try pathRow(u, t, adminRow(s, u), s.admin);
     try button(u, t, adminChangeRect(s, u), change_label, same(s.hover, .change_admin), true);
+
+    // AI tools.
+    try sectionTitle(u, t, c, toolsTitle(s, u), "AI tools");
+    try u.text(.{
+        .x = c.x,
+        .y = toolsTitle(s, u) + title_step - 4,
+        .w = c.w,
+        .h = 18,
+    }, "Connect the AI tool you use once, and it works with every project.", .{
+        .size = 13,
+        .color = t.text2,
+    });
+    for (s.tools, 0..) |tool, i| try drawTool(u, s, t, i, tool);
 
     // Advanced, folded.
     const a = advancedRect(s, u);
@@ -331,6 +373,46 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
     });
     try button(u, t, chooseRect(s, u), choose_label, same(s.hover, .choose_publr), true);
     if (s.publr != null) try button(u, t, clearRect(s, u), clear_label, same(s.hover, .clear_publr), true);
+}
+
+/// A tool: its name, how it stands, and Connect (or a tick once it is connected).
+fn drawTool(u: *ui.Ui, s: State, t: *const Theme, i: usize, tool: ai_tools.Row) !void {
+    const r = toolRow(s, u, i);
+    if (i > 0) try u.rect(.{
+        .x = r.x,
+        .y = r.y,
+        .w = r.w,
+        .h = 1,
+    }, t.border, 0);
+    try u.text(.{
+        .x = r.x,
+        .y = r.y + 8,
+        .w = r.w - 160,
+        .h = 18,
+    }, tool.tool.name(), .{
+        .size = 14,
+        .weight = 500,
+        .color = t.text,
+    });
+    try u.text(.{
+        .x = r.x,
+        .y = r.y + 27,
+        .w = r.w - 160,
+        .h = 16,
+    }, tool.line, .{
+        .size = 12,
+        .color = if (tool.connected) t.running else t.text2,
+    });
+    if (toolButton(s, u, i)) |b| {
+        try button(u, t, b, tool.button, same(s.hover, .{ .connect_tool = tool.tool }), true);
+    } else if (tool.connected) {
+        try u.icon(.{
+            .x = r.x + r.w - 18,
+            .y = r.y + (r.h - 16) / 2,
+            .w = 16,
+            .h = 16,
+        }, icons.check, t.running);
+    }
 }
 
 /// The bar over the page: where you are, as Home's says it.

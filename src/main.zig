@@ -21,6 +21,7 @@ const sheet = @import("sheet.zig");
 const settings = @import("settings.zig");
 const command_line = @import("command_line.zig");
 const welcome = @import("welcome.zig");
+const ai_tools = @import("ai_tools.zig");
 const Cloud = @import("cloud.zig").Cloud;
 const deploying = @import("deploy.zig");
 
@@ -256,6 +257,15 @@ pub fn main(init: std.process.Init) !void {
 
     refreshSites();
     loadRecents();
+    tools = .{
+        .gpa = gpa,
+        .io = io,
+        .env = env,
+        .home = home_dir,
+        .publr = sites.command_path,
+        .changed = redrawAll,
+    };
+    tools.check();
     name_field = .init(gpa);
     address_field = .init(gpa);
     admin_field = .init(gpa);
@@ -696,7 +706,7 @@ fn cloudChanged() void {
         },
         else => {},
     }
-    if (open_sheet == .welcome and cloud.status == .signed_in) closeSheet();
+    if (open_sheet == .welcome and welcome_step == .start and cloud.status == .signed_in) showWelcomeStep(.tools);
     if (deploy_after_sign_in) |name| if (cloud.status != .signing_in) {
         deploy_after_sign_in = null;
         if (cloud.status == .signed_in) deploy(name);
@@ -907,6 +917,11 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
 // Events.
 
 fn onEvent(_: ?*anyopaque, win: *native.Window, event: native.Event) void {
+    // Back from installing a tool, or from Cursor's own Install.
+    if (event == .focus and event.focus) {
+        tools.check();
+        redrawAll();
+    }
     if (open_sheet != null) switch (event) {
         .frame, .resize, .appearance => {},
         else => return sheetEvent(win, event),
@@ -1588,11 +1603,16 @@ fn welcomeIfNew() void {
     redrawAll();
 }
 
+/// The AI tools on this Mac and whether Publr is added to them.
+var tools: ai_tools.Tools = undefined;
+var tool_rows: [ai_tools.all.len]ai_tools.Row = undefined;
+
 var welcome_hover: welcome.Target = .none;
 var welcome_step: welcome.Step = .start;
 var welcome_choice: ?welcome.Choice = null;
 /// Where accounts are explained, for the welcome and the email sheet.
 const accounts_docs = "https://publr.app/docs/account";
+const ai_docs = "https://publr.app/docs/build-with-ai";
 
 fn welcomeState() welcome.State {
     const size = window.size();
@@ -1603,6 +1623,7 @@ fn welcomeState() welcome.State {
         .choice = welcome_choice,
         .email = &admin_field,
         .problem = adminProblem(admin_field.value()),
+        .tools = tools.rows(&tool_rows),
         .signing_in = cloud.status == .signing_in,
         .cloud_problem = if (cloud.status == .signed_out) cloud.problem else null,
         .hover = welcome_hover,
@@ -1631,7 +1652,11 @@ fn welcomeEvent(win: *native.Window, event: native.Event) void {
             .by_hand => chooseWelcome(.by_hand),
             .one_account => chooseWelcome(.one_account),
             .confirm => nextWelcome(),
-            .link => native.openInBrowser(accounts_docs),
+            .link => native.openInBrowser(if (welcome_step == .tools) ai_docs else accounts_docs),
+            .tool_claude, .tool_codex, .tool_cursor => |h| {
+                tools.connect(welcome.toolOf(h).?);
+                redrawAll();
+            },
             .field, .none => {},
         },
         .text_command => |c| switch (c) {
@@ -1640,6 +1665,7 @@ fn welcomeEvent(win: *native.Window, event: native.Event) void {
                 .start => closeSheet(),
                 .without_cloud => showWelcomeStep(.start),
                 .email => showWelcomeStep(.without_cloud),
+                .tools => closeSheet(),
             },
             else => if (typing and admin_field.handle(event)) redrawAll(),
         },
@@ -1650,6 +1676,7 @@ fn welcomeEvent(win: *native.Window, event: native.Event) void {
 
 fn showWelcomeStep(step: welcome.Step) void {
     if (step == .start) welcome_choice = null;
+    if (step == .tools) tools.check();
     welcome_step = step;
     welcome_hover = .none;
     window.setTextInput(step == .email);
@@ -1667,8 +1694,9 @@ fn nextWelcome() void {
     if (!welcome.ready(welcomeState())) return;
     switch (welcome_step) {
         .start => primaryAction(),
-        .without_cloud => if (welcome_choice == .one_account) showWelcomeStep(.email) else closeSheet(),
-        .email => if (sites.setDefaultAdmin(admin_field.value())) closeSheet(),
+        .without_cloud => if (welcome_choice == .one_account) showWelcomeStep(.email) else showWelcomeStep(.tools),
+        .email => if (sites.setDefaultAdmin(admin_field.value())) showWelcomeStep(.tools),
+        .tools => closeSheet(),
     }
 }
 
@@ -2879,6 +2907,7 @@ fn settingsState() settings.State {
         .folders = settings_shown,
         .publr = settings_publr,
         .admin = settingsAdmin(),
+        .tools = tools.rows(&tool_rows),
         .advanced = settings_advanced,
         .busy = settings_busy,
         .problem = settings_problem,
@@ -2893,6 +2922,7 @@ fn clickSettings(t: settings.Target) void {
     switch (t) {
         .change_folder => chooseFolder(.default),
         .change_admin => openAdminSheet(),
+        .connect_tool => |tool| tools.connect(tool),
         .add_folder => chooseFolder(.add),
         .remove_folder => |i| removeFolder(i),
         .advanced => settings_advanced = !settings_advanced,

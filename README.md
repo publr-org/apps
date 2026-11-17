@@ -24,7 +24,9 @@ It carries the command beside its executable (`Contents/MacOS/publr`, `zig-out/b
 and runs it for sync and deploy (`pull`, `push`, `login --sign-on`, `pack`); `$DESKTOP_PUBLR`
 or the PATH's `publr` when that is missing. `$PUBLR_CONFIG` points at another config (tests).
 `--open <folder>` opens that site's tab (`publr desktop <name>`). Settings: the default folder,
-other folders and the default account email. Each start puts the command it carries on
+other folders, the default account email and the AI tools (Claude Code, Codex, Cursor) with
+Publr added to them by `publr setup <tool>` (`src/ai_tools.zig`), also the welcome's last
+step. Each start puts the command it carries on
 the PATH, as `cli/install.sh` does (`src/command_line.zig`): `~/.local/bin/publr` a link to it,
 that folder added to `~/.zshrc` or `~/.bashrc` once; a `publr` file already there is kept.
 
