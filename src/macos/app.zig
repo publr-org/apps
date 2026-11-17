@@ -629,6 +629,19 @@ pub fn appearance() ev.Appearance {
     return if (dark) .dark else .light;
 }
 
+/// The language the person put first in System Settings (`pl-PL`, `en-GB`), copied into
+/// `buf`; empty when the system says none.
+pub fn preferredLanguage(buf: []u8) []const u8 {
+    const list = objc.msg(objc.class("NSLocale"), "preferredLanguages");
+    const first = objc.msg(list, "firstObject");
+    if (first == null) return "";
+    const utf8: ?[*:0]const u8 = @ptrCast(objc.msg(first, "UTF8String"));
+    const text = std.mem.span(utf8 orelse return "");
+    const n = @min(text.len, buf.len);
+    @memcpy(buf[0..n], text[0..n]);
+    return buf[0..n];
+}
+
 /// Runs the event loop until the last window closes or `quit` is called.
 pub fn run() void {
     const app = objc.msg(objc.class("NSApplication"), "sharedApplication");

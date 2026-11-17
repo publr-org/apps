@@ -255,6 +255,12 @@ pub fn init(app_name: [:0]const u8) void {
     _ = app_name;
 }
 
+/// A browser page says none here: the app's own default.
+pub fn preferredLanguage(buf: []u8) []const u8 {
+    _ = buf;
+    return "";
+}
+
 pub fn appearance() ev.Appearance {
     return .light;
 }

@@ -47,6 +47,7 @@ pub const openInBrowser = backend.openInBrowser;
 pub const runOnMain = backend.runOnMain;
 /// Light or dark, as the system is set; `.appearance` events say when it changes.
 pub const appearance = backend.appearance;
+pub const preferredLanguage = backend.preferredLanguage;
 pub const clipboardText = backend.clipboardText;
 /// Brings the app to the front (after the person was sent to the browser).
 pub const activate = backend.activate;
