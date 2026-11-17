@@ -30,5 +30,11 @@ step. Each start puts the command it carries on
 the PATH, as `cli/install.sh` does (`src/command_line.zig`): `~/.local/bin/publr` a link to it,
 that folder added to `~/.zshrc` or `~/.bashrc` once; a `publr` file already there is kept.
 
+Languages: every word a person sees is marked as Publr marks its own (`translated("…")`,
+`translated_count`, `translated_in`; `src/i18n.zig`), and each language is a PO file,
+`i18n/<code>.po`, read with Publr's catalogue. `zig run ../publr/scripts/i18n.zig -- src`
+writes the template for translators. Settings › Language: Desktop's own (the Mac's by
+default) and the one new projects start in (`publr config language`).
+
 `SELF_TEST=1` prints the window's number for `screencapture -o -l<number>`. The tabs open
 at quit are reopened at the next start (`~/Library/Application Support/Publr Desktop`).
