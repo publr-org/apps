@@ -191,6 +191,24 @@ pub const WebView = struct {
         _ = self;
     }
 
+    pub fn goBack(self: *WebView) void {
+        _ = self;
+    }
+
+    pub fn goForward(self: *WebView) void {
+        _ = self;
+    }
+
+    pub fn canGoBack(self: *WebView) bool {
+        _ = self;
+        return false;
+    }
+
+    pub fn canGoForward(self: *WebView) bool {
+        _ = self;
+        return false;
+    }
+
     pub fn address(self: *WebView) []const u8 {
         return self.url;
     }

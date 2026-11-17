@@ -391,6 +391,23 @@ pub const WebView = struct {
         _ = objc.msg(self.wk, "reload");
     }
 
+    /// The page before this one, or after it, in the view's own history.
+    pub fn goBack(self: *WebView) void {
+        _ = objc.msg(self.wk, "goBack");
+    }
+
+    pub fn goForward(self: *WebView) void {
+        _ = objc.msg(self.wk, "goForward");
+    }
+
+    pub fn canGoBack(self: *WebView) bool {
+        return objc.send(*const fn (id, SEL) callconv(.c) bool)(self.wk, objc.sel("canGoBack"));
+    }
+
+    pub fn canGoForward(self: *WebView) bool {
+        return objc.send(*const fn (id, SEL) callconv(.c) bool)(self.wk, objc.sel("canGoForward"));
+    }
+
     /// The address the page shows (empty before the first load); valid until the next call
     /// into the web view.
     pub fn address(self: *WebView) []const u8 {
