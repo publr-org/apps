@@ -59,6 +59,7 @@ pub const Rare = enum {
     clone,
     local_copy,
     finder,
+    copy_path,
     deploy,
     dashboard,
     remove,
@@ -68,6 +69,7 @@ pub const Rare = enum {
             .clone => "Clone to this Mac",
             .local_copy => "Open copy on this Mac",
             .finder => "Show in Finder",
+            .copy_path => "Copy path",
             .deploy => "Deploy to Cloud\u{2026}",
             .dashboard => "Open in Cloud dashboard",
             .remove => "Remove from this Mac",
@@ -79,6 +81,7 @@ pub const Rare = enum {
             .clone => icons.device_desktop,
             .local_copy => icons.device_desktop,
             .finder => icons.folder,
+            .copy_path => icons.copy,
             .deploy => icons.upload,
             .dashboard => icons.globe,
             .remove => icons.trash,
@@ -105,6 +108,8 @@ pub const Target = union(enum) {
     /// An app's card on Overview.
     app: usize,
     finder,
+    /// The folder's path to the clipboard, to open it in Terminal.
+    copy_path,
     /// Advanced, at the details' foot: fold or unfold it.
     advanced,
     /// Under Advanced: a build of Publr for this project, or its own version again.
@@ -151,6 +156,8 @@ pub const State = struct {
     /// Each app's picture in the `ui`, by the apps' order; null where there is none yet.
     app_thumbs: []const ?[]const u8,
     menu_open: bool,
+    /// The folder's path was just copied: its button says so.
+    copied: bool = false,
     /// How far Overview is scrolled.
     scroll: f32,
     page: Page,
@@ -375,6 +382,21 @@ fn details(s: State, out: *[5]Detail) []const Detail {
     return out[0..n];
 }
 
+const copy_label = "Copy path";
+const copied_label = "Copied";
+
+/// Copy path, left of Show in Finder.
+fn copyRect(s: State, u: *ui.Ui, list: []const Detail) ui.Rect {
+    const f = finderRect(s, u, list);
+    const w = u.measure(copy_label, button_text) + 4;
+    return .{
+        .x = f.x - 20 - w,
+        .y = f.y,
+        .w = w,
+        .h = f.h,
+    };
+}
+
 fn finderRect(s: State, u: *ui.Ui, list: []const Detail) ui.Rect {
     const r = detailRow(s, list.len - 1);
     const w = u.measure("Show in Finder", button_text) + 4;
@@ -471,7 +493,7 @@ pub fn maxScroll(s: State) f32 {
     return @max(0, overviewBottom(at_top) + pad - s.height);
 }
 
-fn rareList(s: State, out: *[6]Rare) []const Rare {
+fn rareList(s: State, out: *[7]Rare) []const Rare {
     var n: usize = 0;
     if (s.kind == .cloud and !s.cloning) {
         out[n] = .clone;
@@ -483,7 +505,8 @@ fn rareList(s: State, out: *[6]Rare) []const Rare {
     }
     if (s.kind != .cloud) {
         out[n] = .finder;
-        n += 1;
+        out[n + 1] = .copy_path;
+        n += 2;
     }
     if (s.kind == .local) {
         out[n] = .deploy;
@@ -525,7 +548,7 @@ fn menuItemRect(s: State, list: []const Rare, k: usize) ui.Rect {
 pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (y < s.top) return .none;
     if (s.menu_open and s.page == .overview) {
-        var list: [6]Rare = undefined;
+        var list: [7]Rare = undefined;
         const rare = rareList(s, &list);
         for (rare, 0..) |r, k| if (menuItemRect(s, rare, k).contains(x, y)) return .{ .rare = r };
         if (menuRect(s, rare.len).contains(x, y)) return .none;
@@ -549,6 +572,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     var list: [5]Detail = undefined;
     const shown = details(s, &list);
     if (s.folder.len > 0 and finderRect(s, u, shown).contains(x, y)) return .finder;
+    if (s.folder.len > 0 and copyRect(s, u, shown).contains(x, y)) return .copy_path;
     if (s.folder.len == 0) return .none;
     if (advancedRect(s).contains(x, y)) return .advanced;
     if (!s.advanced) return .none;
@@ -1104,8 +1128,8 @@ fn drawDetails(u: *ui.Ui, s: State, t: *const Theme) !void {
         try u.text(.{
             .x = r.x + 220,
             .y = r.y,
-            // Room for the row's text button: Show in Finder.
-            .w = r.w - 220 - 140,
+            // Room for the row's text buttons: Copy path, Show in Finder.
+            .w = r.w - 220 - 240,
             .h = r.h,
         }, d.value, .{
             .size = 13,
@@ -1118,6 +1142,12 @@ fn drawDetails(u: *ui.Ui, s: State, t: *const Theme) !void {
         .size = button_text.size,
         .weight = button_text.weight,
         .color = if (same(s.hover, .finder)) t.text else t.text2,
+        .@"align" = .right,
+    });
+    try u.text(copyRect(s, u, shown), if (s.copied) copied_label else copy_label, .{
+        .size = button_text.size,
+        .weight = button_text.weight,
+        .color = if (s.copied) t.running else if (same(s.hover, .copy_path)) t.text else t.text2,
         .@"align" = .right,
     });
     try drawAdvanced(u, s, t);
@@ -1205,7 +1235,7 @@ fn outlined(u: *ui.Ui, t: *const Theme, r: ui.Rect, label: []const u8, hovered: 
 }
 
 fn drawMenu(u: *ui.Ui, s: State, t: *const Theme) !void {
-    var list: [6]Rare = undefined;
+    var list: [7]Rare = undefined;
     const rare = rareList(s, &list);
     const r = menuRect(s, rare.len);
     try u.box(r, .{

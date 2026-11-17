@@ -50,6 +50,7 @@ const Action = struct {
     const stop = 5;
     const start = 6;
     const trash = 7;
+    const copy_path = 16;
     const view_live_local = 8;
     const send_changes = 10;
     const open_review = 15;
@@ -95,6 +96,8 @@ const ProjectTab = struct {
     signed: bool = false,
     /// Its "more" menu is open.
     menu_open: bool = false,
+    /// Its folder's path was just copied.
+    copied: bool = false,
     /// How far its Overview is scrolled.
     scroll: f32 = 0,
     /// Its Advanced details are unfolded (for this run only).
@@ -611,6 +614,12 @@ fn showInFinder(name: []const u8) void {
     native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "file://{s}", .{folder}, 0) catch return);
 }
 
+/// The site's folder, whole, on the clipboard: `cd` there in Terminal and start an agent.
+fn copyPath(name: []const u8) void {
+    const folder = sites.folderOf(name);
+    if (folder.len > 0) native.setClipboardText(folder);
+}
+
 fn siteRunning(name: []const u8) bool {
     const s = sites.find(name) orelse return false;
     return s.running;
@@ -865,6 +874,10 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
                 .tag = Action.finder,
             },
             .{
+                .title = "Copy path",
+                .tag = Action.copy_path,
+            },
+            .{
                 .separator = true,
             },
             .{
@@ -894,6 +907,10 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
         .{
             .title = "Show in Finder",
             .tag = Action.finder,
+        },
+        .{
+            .title = "Copy path",
+            .tag = Action.copy_path,
         },
         if (s.running) .{
             .title = "Stop",
@@ -1004,6 +1021,10 @@ fn hitAt(x: f64, y: f64) Hover {
 
 fn setHover(win: *native.Window, h: Hover) void {
     if (std.meta.eql(h, hover)) return;
+    // "Copied" lasts while the pointer stays on it.
+    if (std.meta.eql(hover, Hover{ .project = .copy_path })) if (active) |i| if (tabs.items[i].project) |pt| {
+        pt.copied = false;
+    };
     markHover(hover, h);
     hover = h;
     win.setCursor(switch (h) {
@@ -1447,6 +1468,7 @@ fn act(name: []const u8, tag: u32) void {
             native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.address}, 0) catch return);
         },
         Action.finder => showInFinder(name),
+        Action.copy_path => copyPath(name),
         Action.deploy => return deploy(name),
         Action.view_live_local => {
             var buf: [512]u8 = undefined;
@@ -2329,6 +2351,7 @@ fn projectPage(i: usize) project.State {
         .space = if (pt.space.len > 0) pt.space else spaceOf(pt.live),
         .apps = pt.apps,
         .menu_open = pt.menu_open,
+        .copied = pt.copied,
         .scroll = pt.scroll,
         .page = pt.page,
         .hover = switch (hover) {
@@ -2343,12 +2366,17 @@ fn clickProject(i: usize, target: project.Target) void {
     const pt = t.project orelse return;
     const was_open = pt.menu_open;
     pt.menu_open = false;
+    pt.copied = false;
     switch (target) {
         .none, .outside => {},
         .more => pt.menu_open = !was_open,
         .clone => startClone(pt),
         .side => |pg| goTo(i, pg),
         .finder => showInFinder(pt.folder),
+        .copy_path => {
+            copyPath(pt.folder);
+            pt.copied = true;
+        },
         .advanced => pt.advanced = !pt.advanced,
         .choose_build => choosePublr(pt.folder, false),
         .use_pin => choosePublr(pt.folder, true),
@@ -2362,6 +2390,7 @@ fn clickProject(i: usize, target: project.Target) void {
             .clone => startClone(pt),
             .local_copy => openSite(pt.folder),
             .finder => showInFinder(pt.folder),
+            .copy_path => copyPath(pt.folder),
             .deploy => deploy(pt.folder),
             .dashboard => {
                 var buf: [512]u8 = undefined;
