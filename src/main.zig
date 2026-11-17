@@ -273,6 +273,7 @@ pub fn main(init: std.process.Init) !void {
     support_dir = try std.fs.path.join(gpa, &.{ home_dir, "Library/Application Support/Publr Desktop" });
     Io.Dir.cwd().createDirPath(io, support_dir) catch {};
     loadAppLanguage();
+    loadSidebar();
     native.spawn(command_line.ensure, .{ gpa, io, env }) catch {};
 
     native.init(app_name);
@@ -1236,6 +1237,30 @@ fn openProjectTab(name: []const u8, folder: []const u8, live: []const u8, space:
         .project = pt,
     }) catch return;
     showTab(tabs.items.len - 1);
+}
+
+/// Projects' sidebar folded to a strip, as last left (`support_dir/sidebar`).
+var side_folded = false;
+
+fn sidebarPath(buf: []u8) []const u8 {
+    return std.fmt.bufPrint(buf, "{s}/sidebar", .{support_dir}) catch "";
+}
+
+fn loadSidebar() void {
+    var pb: [1024]u8 = undefined;
+    var buf: [16]u8 = undefined;
+    const text = Io.Dir.cwd().readFile(io, sidebarPath(&pb), &buf) catch "";
+    side_folded = std.mem.eql(u8, std.mem.trim(u8, text, " \n"), "folded");
+}
+
+fn foldSidebar(folded: bool) void {
+    side_folded = folded;
+    var pb: [1024]u8 = undefined;
+    Io.Dir.cwd().writeFile(io, .{
+        .sub_path = sidebarPath(&pb),
+        .data = if (folded) "folded" else "open",
+    }) catch |e| std.debug.print("desktop: keeping the sidebar's state: {t}\n", .{e});
+    if (active) |i| showTab(i);
 }
 
 /// A one-time sign-on address is never shown: the page it leads to is.
@@ -2387,7 +2412,7 @@ fn showTab(i: usize) void {
     // the strip.
     if (t.project) |pt| {
         // A project's Overview and sidebar are drawn here; its other pages lie beside them.
-        if (pt.page == .overview) window.setBarHeight(window.size().h + 10_000) else window.setWebArea(project.sidebar_width, bar.height + project.address_bar_height);
+        if (pt.page == .overview) window.setBarHeight(window.size().h + 10_000) else window.setWebArea(project.sidebarWidth(side_folded), bar.height + project.address_bar_height);
     } else window.setBarHeight(bar.height);
     redrawAll();
 }
@@ -2454,6 +2479,7 @@ fn projectPage(i: usize) project.State {
         .menu_open = pt.menu_open,
         .copied = pt.copied,
         .location = shownAddress(t.web.address()),
+        .folded = side_folded,
         .scroll = pt.scroll,
         .page = pt.page,
         .hover = switch (hover) {
@@ -2480,6 +2506,7 @@ fn clickProject(i: usize, target: project.Target) void {
             pt.copied = true;
         },
         .open_browser => openInBrowser(t),
+        .fold => foldSidebar(!side_folded),
         .advanced => pt.advanced = !pt.advanced,
         .choose_build => choosePublr(pt.folder, false),
         .use_pin => choosePublr(pt.folder, true),

@@ -16,6 +16,22 @@ const translated = i18n.translated;
 const centred = @import("bar.zig").centred;
 
 pub const sidebar_width: f32 = 272;
+/// Folded: a strip of icons, a picture per app.
+pub const sidebar_folded: f32 = 64;
+
+pub fn sidebarWidth(folded: bool) f32 {
+    return if (folded) sidebar_folded else sidebar_width;
+}
+
+fn sideW(s: State) f32 {
+    return sidebarWidth(s.folded);
+}
+
+/// Project home's row, and the apps' label under it.
+const home_row: f32 = 36;
+const apps_label: f32 = 30;
+/// A folded sidebar's buttons and app pictures.
+const folded_tile: f32 = 40;
 /// Over the site or admin: where the page is (this Mac or Cloud), its address, and Open in
 /// browser. The web view lies under it.
 pub const address_bar_height: f32 = 44;
@@ -117,6 +133,8 @@ pub const Target = union(enum) {
     copy_path,
     /// The page shown (the site, on Overview), in the person's browser.
     open_browser,
+    /// The sidebar folded to a strip, or unfolded.
+    fold,
     /// Advanced, at the details' foot: fold or unfold it.
     advanced,
     /// Under Advanced: a build of Publr for this project, or its own version again.
@@ -167,6 +185,8 @@ pub const State = struct {
     copied: bool = false,
     /// The address the site or admin page is at, for the address bar.
     location: []const u8 = "",
+    /// The sidebar is folded to a strip.
+    folded: bool = false,
     /// How far Overview is scrolled.
     scroll: f32,
     page: Page,
@@ -192,14 +212,42 @@ const button_text: ui.TextStyle = .{
 
 // The sidebar.
 
+/// The sidebar's places: Project home (`k` 0), a row; then each app, a card (a picture, when
+/// folded).
 fn sideCardRect(s: State, k: usize) ui.Rect {
+    if (s.folded) {
+        const gap: f32 = if (k == 0) 0 else 18;
+        return .{
+            .x = (sidebar_folded - folded_tile) / 2,
+            .y = s.top + 60 + gap + (folded_tile + 8) * @as(f32, @floatFromInt(k)),
+            .w = folded_tile,
+            .h = folded_tile,
+        };
+    }
     const w = sidebar_width - 2 * side_pad;
+    if (k == 0) return .{
+        .x = side_pad - 4,
+        .y = s.top + side_head,
+        .w = w + 8,
+        .h = home_row,
+    };
     const h = w * side_thumb_ratio + side_label;
     return .{
         .x = side_pad,
-        .y = s.top + side_head + (h + side_gap) * @as(f32, @floatFromInt(k)),
+        .y = s.top + side_head + home_row + apps_label + (h + side_gap) * @as(f32, @floatFromInt(k - 1)),
         .w = w,
         .h = h,
+    };
+}
+
+/// The button that folds the sidebar or unfolds it.
+fn foldRect(s: State) ui.Rect {
+    const size: f32 = 28;
+    return .{
+        .x = if (s.folded) (sidebar_folded - size) / 2 else sidebar_width - side_pad - size,
+        .y = s.top + 16,
+        .w = size,
+        .h = size,
     };
 }
 
@@ -209,6 +257,12 @@ fn sidePage(k: usize) Page {
 }
 
 fn adminRowRect(s: State) ui.Rect {
+    if (s.folded) return .{
+        .x = (sidebar_folded - folded_tile) / 2,
+        .y = s.height - side_foot + (side_foot - folded_tile) / 2,
+        .w = folded_tile,
+        .h = folded_tile,
+    };
     return .{
         .x = side_pad - 4,
         .y = s.height - side_foot + 8,
@@ -220,12 +274,12 @@ fn adminRowRect(s: State) ui.Rect {
 // Overview's layout, top to bottom, beside the sidebar.
 
 fn contentX(s: State) f32 {
-    const room = s.width - sidebar_width;
-    return sidebar_width + @max(pad, (room - content_max) / 2);
+    const room = s.width - sideW(s);
+    return sideW(s) + @max(pad, (room - content_max) / 2);
 }
 
 fn contentWidth(s: State) f32 {
-    return @min(content_max, s.width - sidebar_width - 2 * pad);
+    return @min(content_max, s.width - sideW(s) - 2 * pad);
 }
 
 fn headTop(s: State) f32 {
@@ -586,7 +640,8 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
         if (menuRect(s, rare.len).contains(x, y)) return .none;
         return .outside;
     }
-    if (x < sidebar_width) {
+    if (x < sideW(s)) {
+        if (foldRect(s).contains(x, y)) return .fold;
         for (0..s.apps.len + 1) |k| if (sideCardRect(s, k).contains(x, y)) return .{ .side = sidePage(k) };
         if (adminRowRect(s).contains(x, y)) return .{ .side = .admin };
         return .none;
@@ -649,9 +704,9 @@ fn withIcon(u: *ui.Ui, t: *const Theme, r: ui.Rect, icon: []const u8, label: []c
 
 fn addressBar(s: State) ui.Rect {
     return .{
-        .x = sidebar_width,
+        .x = sideW(s),
         .y = s.top,
-        .w = s.width - sidebar_width,
+        .w = s.width - sideW(s),
         .h = address_bar_height,
     };
 }
@@ -731,50 +786,70 @@ fn drawAddressBar(u: *ui.Ui, s: State, t: *const Theme) !void {
 // The sidebar.
 
 fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
+    const w = sideW(s);
     const r: ui.Rect = .{
         .x = 0,
         .y = s.top,
-        .w = sidebar_width,
+        .w = w,
         .h = s.height - s.top,
     };
     try u.rect(r, t.sidebar, 0);
     try u.rect(.{
-        .x = sidebar_width - 1,
+        .x = w - 1,
         .y = s.top,
         .w = 1,
         .h = r.h,
     }, t.border, 0);
 
-    try u.text(.{
-        .x = side_pad + 2,
-        .y = s.top + 18,
-        .w = sidebar_width - 2 * side_pad,
-        .h = 22,
-    }, s.name, .{
-        .size = 15,
-        .weight = 600,
-        .color = t.text,
-    });
-    try statusLine(u, t, side_pad + 2, s.top + 42, sidebar_width - 2 * side_pad, s);
+    const fold = foldRect(s);
+    if (same(s.hover, .fold)) try u.rect(fold, t.hover, 6);
+    try u.icon(centred(fold, 16), if (s.folded) icons.chevron_right else icons.chevron_left, t.text2);
 
+    if (!s.folded) {
+        try u.text(.{
+            .x = side_pad + 2,
+            .y = s.top + 18,
+            .w = fold.x - side_pad - 8,
+            .h = 22,
+        }, s.name, .{
+            .size = 15,
+            .weight = 600,
+            .color = t.text,
+        });
+        try statusLine(u, t, side_pad + 2, s.top + 42, sidebar_width - 2 * side_pad, s);
+    }
+
+    const list_top = if (s.folded) s.top + 56 else s.top + side_head - 4;
     try u.beginClip(.{
         .x = 0,
-        .y = s.top + side_head - 4,
-        .w = sidebar_width,
-        .h = s.height - s.top - side_head - side_foot + 4,
+        .y = list_top,
+        .w = w,
+        .h = s.height - side_foot - list_top,
     });
-    for (0..s.apps.len + 1) |k| try sideCard(u, s, t, k);
+    try homeRow(u, s, t);
+    if (!s.folded and s.apps.len > 0) try u.text(.{
+        .x = side_pad + 2,
+        .y = s.top + side_head + home_row + 8,
+        .w = sidebar_width - 2 * side_pad,
+        .h = 16,
+    }, translated("Apps"), .{
+        .size = 12,
+        .weight = 500,
+        .color = t.text3,
+    });
+    for (1..s.apps.len + 1) |k| try sideCard(u, s, t, k);
     try u.endClip();
 
     try u.rect(.{
         .x = 0,
         .y = s.height - side_foot,
-        .w = sidebar_width,
+        .w = w,
         .h = 1,
     }, t.border, 0);
     const admin = adminRowRect(s);
     const on = s.page == .admin;
     if (on) try u.rect(admin, t.selected, 8) else if (same(s.hover, .{ .side = .admin })) try u.rect(admin, t.hover, 8);
+    if (s.folded) return u.icon(centred(admin, 16), icons.settings, if (on) t.text else t.text2);
     try u.icon(.{
         .x = admin.x + 10,
         .y = admin.y + (admin.h - 16) / 2,
@@ -790,6 +865,31 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .size = 13,
         .weight = 500,
         .color = if (on) t.text else t.text2,
+    });
+}
+
+/// Project home: the project's own page, a row with a house (an icon alone, folded).
+fn homeRow(u: *ui.Ui, s: State, t: *const Theme) !void {
+    const r = sideCardRect(s, 0);
+    const on = s.page == .overview;
+    if (on) try u.rect(r, t.selected, 8) else if (same(s.hover, .{ .side = .overview })) try u.rect(r, t.hover, 8);
+    const color = if (on) t.text else t.text2;
+    if (s.folded) return u.icon(centred(r, 16), icons.home, color);
+    try u.icon(.{
+        .x = r.x + 10,
+        .y = r.y + (r.h - 16) / 2,
+        .w = 16,
+        .h = 16,
+    }, icons.home, color);
+    try u.text(.{
+        .x = r.x + 36,
+        .y = r.y,
+        .w = r.w - 46,
+        .h = r.h,
+    }, translated("Project home"), .{
+        .size = 13,
+        .weight = 500,
+        .color = color,
     });
 }
 
@@ -813,10 +913,19 @@ fn statusLine(u: *ui.Ui, t: *const Theme, x: f32, y: f32, w: f32, s: State) !voi
 }
 
 fn sideCard(u: *ui.Ui, s: State, t: *const Theme, k: usize) !void {
+    std.debug.assert(k > 0);
     const r = sideCardRect(s, k);
     const page = sidePage(k);
     const on = samePage(s.page, page);
     const hovered = same(s.hover, .{ .side = page });
+    if (s.folded) {
+        try picture(u, t, r, thumbOf(s, k - 1), 8, false);
+        if (on or hovered) try u.box(r, .{
+            .border = if (on) t.text2 else t.input,
+            .radius = 8,
+        });
+        return;
+    }
     try u.box(r, .{
         .fill = t.bg,
         .border = if (on) t.text2 else if (hovered) t.input else t.border,
@@ -828,12 +937,8 @@ fn sideCard(u: *ui.Ui, s: State, t: *const Theme, k: usize) !void {
         .w = r.w - 10,
         .h = r.h - side_label - 5,
     };
-    if (k == 0) {
-        try overviewArt(u, t, thumb);
-    } else {
-        try picture(u, t, thumb, thumbOf(s, k - 1), 6, false);
-    }
-    const label = if (k == 0) translated("Overview") else s.apps[k - 1].label;
+    try picture(u, t, thumb, thumbOf(s, k - 1), 6, false);
+    const label = s.apps[k - 1].label;
     try u.text(.{
         .x = r.x + 12,
         .y = r.y + r.h - side_label,
@@ -844,7 +949,7 @@ fn sideCard(u: *ui.Ui, s: State, t: *const Theme, k: usize) !void {
         .weight = if (on) 600 else 500,
         .color = if (on or hovered) t.text else t.text2,
     });
-    if (k > 0) try u.text(.{
+    try u.text(.{
         .x = r.x + 12,
         .y = r.y + r.h - side_label,
         .w = r.w - 24,
@@ -854,38 +959,6 @@ fn sideCard(u: *ui.Ui, s: State, t: *const Theme, k: usize) !void {
         .color = t.text3,
         .@"align" = .right,
     });
-}
-
-/// Overview's card: the project's parts drawn as tiles, the size of a site's picture.
-fn overviewArt(u: *ui.Ui, t: *const Theme, r: ui.Rect) !void {
-    try u.rect(r, t.hover, 6);
-    const gap: f32 = 6;
-    const inner: ui.Rect = .{
-        .x = r.x + 14,
-        .y = r.y + 14,
-        .w = r.w - 28,
-        .h = r.h - 28,
-    };
-    const half_w = (inner.w - gap) / 2;
-    const half_h = (inner.h - gap) / 2;
-    try u.rect(.{
-        .x = inner.x,
-        .y = inner.y,
-        .w = half_w,
-        .h = inner.h,
-    }, t.bg, 5);
-    try u.rect(.{
-        .x = inner.x + half_w + gap,
-        .y = inner.y,
-        .w = half_w,
-        .h = half_h,
-    }, t.bg, 5);
-    try u.rect(.{
-        .x = inner.x + half_w + gap,
-        .y = inner.y + half_h + gap,
-        .w = half_w,
-        .h = half_h,
-    }, t.bg, 5);
 }
 
 /// A site's picture, its top shown; a placeholder of the same size when there is none.
@@ -917,9 +990,9 @@ fn picture(u: *ui.Ui, t: *const Theme, r: ui.Rect, key: ?[]const u8, radius: f32
 
 fn drawOverview(u: *ui.Ui, s: State, t: *const Theme) !void {
     const page: ui.Rect = .{
-        .x = sidebar_width,
+        .x = sideW(s),
         .y = s.top,
-        .w = s.width - sidebar_width,
+        .w = s.width - sideW(s),
         .h = s.height - s.top,
     };
     try u.rect(page, t.bg, 0);

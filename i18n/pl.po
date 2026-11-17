@@ -668,3 +668,6 @@ msgstr "Dodaj Publr ręcznie w jego ustawieniach MCP."
 
 msgid "Copy settings"
 msgstr "Kopiuj ustawienia"
+
+msgid "Project home"
+msgstr "Strona projektu"
