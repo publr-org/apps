@@ -5,6 +5,8 @@
 
 const std = @import("std");
 const native = @import("native");
+const i18n = @import("i18n.zig");
+const translated = i18n.translated;
 
 pub const Tool = enum {
     claude,
@@ -78,16 +80,16 @@ pub const Tools = struct {
         for (all, 0..) |t, i| out[i] = .{
             .tool = t,
             .line = switch (self.status[i]) {
-                .missing => "Not on this Mac",
-                .found => "On this Mac, not connected",
-                .connecting => "Connecting\u{2026}",
-                .in_cursor => "In Cursor, choose Install",
-                .connected => "Connected",
-                .failed => "Couldn\u{2019}t connect. Try again.",
+                .missing => translated("Not on this Mac"),
+                .found => translated("On this Mac, not connected"),
+                .connecting => translated("Connecting\u{2026}"),
+                .in_cursor => translated("In Cursor, choose Install"),
+                .connected => translated("Connected"),
+                .failed => translated("Couldn\u{2019}t connect. Try again."),
             },
             .button = switch (self.status[i]) {
-                .found, .failed => "Connect",
-                .in_cursor => "Open Cursor again",
+                .found, .failed => translated("Connect"),
+                .in_cursor => translated("Open Cursor again"),
                 else => "",
             },
             .connected = self.status[i] == .connected,
@@ -97,7 +99,7 @@ pub const Tools = struct {
 
     /// Adds Publr to `tool`; the row says how it went.
     pub fn connect(self: *Tools, tool: Tool) void {
-        const i = @intFromEnum(tool);
+        const i = @backingInt(tool);
         if (self.status[i] == .connecting or self.status[i] == .missing) return;
         self.status[i] = .connecting;
         const job = self.gpa.create(Job) catch return;
@@ -180,7 +182,7 @@ const Job = struct {
         defer arena.deinit();
         const a = arena.allocator();
         var env = try t.env.clone(a);
-        const dir = t.dirs[@intFromEnum(self.tool)];
+        const dir = t.dirs[@backingInt(self.tool)];
         const path = try std.fmt.allocPrint(a, "{s}{s}{s}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", .{
             dir,
             if (dir.len > 0) ":" else "",
@@ -202,7 +204,7 @@ const Job = struct {
         const self: *Job = @ptrCast(@alignCast(ctx));
         const t = self.tools;
         defer t.gpa.destroy(self);
-        const i = @intFromEnum(self.tool);
+        const i = @backingInt(self.tool);
         t.status[i] = if (!self.ok) .failed else if (self.tool == .cursor) .in_cursor else .found;
         t.check();
         t.changed();

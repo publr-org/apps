@@ -7,6 +7,8 @@ const std = @import("std");
 const native = @import("native");
 const ui = @import("ui");
 const Theme = @import("theme.zig").Theme;
+const i18n = @import("i18n.zig");
+const translated = i18n.translated;
 
 const width: f32 = 440;
 const pad: f32 = 24;
@@ -84,7 +86,8 @@ pub const State = struct {
     fields: []const Field,
     primary: []const u8,
     primary_enabled: bool,
-    secondary: []const u8 = "Cancel",
+    /// Empty for Cancel, in the language spoken now (`secondaryLabel`).
+    secondary: []const u8 = "",
     /// Shown instead of the buttons while the work runs ("Making the site…").
     busy: ?[]const u8 = null,
     hover: Target,
@@ -100,6 +103,11 @@ pub const Target = union(enum) {
     field: usize,
     option: usize,
 };
+
+/// The second button's words: its own, or Cancel.
+fn secondaryLabel(s: State) []const u8 {
+    return if (s.secondary.len > 0) s.secondary else translated("Cancel");
+}
 
 fn choiceHeight(s: State) f32 {
     return if (s.choice != null) choice_step else 0;
@@ -142,7 +150,7 @@ fn optionRect(s: State, i: usize) ui.Rect {
 fn buttonRect(s: State, u: *ui.Ui, which: Target) ui.Rect {
     const p = panel(s);
     const pw = u.measure(s.primary, button_text) + 32;
-    const cw = u.measure(s.secondary, button_text) + 32;
+    const cw = u.measure(secondaryLabel(s), button_text) + 32;
     const y = p.y + p.h - pad - button_height;
     const px = p.x + p.w - pad - pw;
     return switch (which) {
@@ -305,7 +313,7 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme, focus: ?usize, window: *native
         .border = t.input,
         .radius = 8,
     });
-    try u.text(c, s.secondary, .{
+    try u.text(c, secondaryLabel(s), .{
         .size = button_text.size,
         .weight = button_text.weight,
         .color = t.text,

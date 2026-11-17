@@ -23,6 +23,9 @@ const command_line = @import("command_line.zig");
 const welcome = @import("welcome.zig");
 const ai_tools = @import("ai_tools.zig");
 const i18n = @import("i18n.zig");
+const translated = i18n.translated;
+const translated_count = i18n.translated_count;
+const fill = i18n.fill;
 const Cloud = @import("cloud.zig").Cloud;
 const deploying = @import("deploy.zig");
 
@@ -417,33 +420,35 @@ fn themeFor(a: native.Appearance) *const themes.Theme {
 }
 
 fn buildMenus() void {
+    // Titles in the person's language, made again when it changes (the menus copy them).
+    var names: [5][128]u8 = undefined;
     native.setAppMenuItems(&.{
         .{
-            .title = "Settings…",
+            .title = menuTitle(&names[0], translated("Settings…")),
             .key = ",",
             .tag = Tag.settings,
         },
     });
     native.setMenu("File", &.{
         .{
-            .title = "Home",
+            .title = menuTitle(&names[0], translated("Home")),
             .key = "t",
             .tag = Tag.home,
         },
         .{
-            .title = "Close Tab",
+            .title = menuTitle(&names[1], translated("Close Tab")),
             .key = "w",
             .tag = Tag.close_tab,
         },
     });
     native.setMenu("View", &.{
         .{
-            .title = "Reload",
+            .title = menuTitle(&names[0], translated("Reload")),
             .key = "r",
             .tag = Tag.reload,
         },
         .{
-            .title = "Open in Browser",
+            .title = menuTitle(&names[1], translated("Open in Browser")),
             .key = "B",
             .tag = Tag.open_in_browser,
         },
@@ -451,19 +456,35 @@ fn buildMenus() void {
             .separator = true,
         },
         .{
-            .title = "Refresh Sites",
+            .title = menuTitle(&names[2], translated("Refresh Sites")),
             .tag = Tag.refresh_sites,
         },
     });
     var tab_items: [9]native.MenuItem = undefined;
+    var tab_names: [9][128]u8 = undefined;
     const digits = [_][:0]const u8{ "1", "2", "3", "4", "5", "6", "7", "8", "9" };
-    const titles = [_][:0]const u8{ "Tab 1", "Tab 2", "Tab 3", "Tab 4", "Tab 5", "Tab 6", "Tab 7", "Tab 8", "Tab 9" };
-    for (&tab_items, 0..) |*it, i| it.* = .{
-        .title = titles[i],
-        .key = digits[i],
-        .tag = @intCast(Tag.tab + i),
-    };
+    for (&tab_items, 0..) |*it, i| {
+        var words: [128]u8 = undefined;
+        it.* = .{
+            .title = menuTitle(&tab_names[i], fill(&words, translated("Tab {number}"), .{
+                .number = i + 1,
+            })),
+            .key = digits[i],
+            .tag = @intCast(Tag.tab + i),
+        };
+    }
     native.setMenu("Tabs", &tab_items);
+}
+
+/// `text` with its `{name}`s filled (`i18n.fill`), in `a`.
+fn filled(a: std.mem.Allocator, text: []const u8, values: anytype) ![]const u8 {
+    const buf = try a.alloc(u8, text.len + 1024);
+    return fill(buf, text, values);
+}
+
+/// `text` ended with a zero, as a menu takes it, in `buf`.
+fn menuTitle(buf: *[128]u8, text: []const u8) [:0]const u8 {
+    return std.fmt.bufPrintSentinel(buf, "{s}", .{text}, 0) catch "";
 }
 
 // What is drawn: the bar's and Home's states, made from Desktop's.
@@ -526,7 +547,7 @@ fn groupItems(a: std.mem.Allocator) void {
             const where = if (std.mem.eql(u8, s.entry, s.folder)) std.fs.path.dirname(s.folder) orelse s.folder else s.entry;
             it.group = shortFolder(a, where);
         },
-        .cloud => it.group = "On Cloud",
+        .cloud => it.group = translated("On Cloud"),
     };
 }
 
@@ -575,7 +596,7 @@ fn addLocal(a: std.mem.Allocator, name: []const u8) void {
         state = syncing.stateOf(s.name) orelse .checking;
     }
     const label_buf = a.alloc(u8, 128) catch return;
-    const detail = if (linked) syncing.labelOf(s.name, state, label_buf) else if (s.running) "Running" else "Stopped";
+    const detail = if (linked) syncing.labelOf(s.name, state, label_buf) else if (s.running) translated("Running") else translated("Stopped");
     var kb: [256]u8 = undefined;
     const thumb = if (thumbs.key(&kb, s.name)) |k| a.dupe(u8, k) catch null else null;
     items.append(gpa, .{
@@ -689,7 +710,7 @@ fn hostOf(address: []const u8) []const u8 {
 
 fn addProject(a: std.mem.Allocator, space: usize, k: usize) void {
     const p = cloud.spaces[space].projects[k];
-    const detail = std.fmt.allocPrint(a, "{s}\u{00a0}\u{00b7}\u{00a0}{s}", .{ hostOf(p.address), if (p.preview) "Preview" else "Live" }) catch return;
+    const detail = std.fmt.allocPrint(a, "{s}\u{00a0}\u{00b7}\u{00a0}{s}", .{ hostOf(p.address), if (p.preview) translated("Preview") else translated("Live") }) catch return;
     var kb: [256]u8 = undefined;
     var nb: [256]u8 = undefined;
     const tname = std.fmt.bufPrint(&nb, "cloud-{s}", .{p.slug}) catch return;
@@ -776,12 +797,12 @@ fn homeState() home.State {
         .scroll = scroll,
         .menu = null,
         .title = switch (view) {
-            .recents => "Recent",
-            .all => "All projects",
-            .local => "On this Mac",
-            .cloud => "On Cloud",
-            .space => |i| if (i < cloud.spaces.len) cloud.spaces[i].name else "On Cloud",
-            .settings => "Settings",
+            .recents => translated("Recent"),
+            .all => translated("All projects"),
+            .local => translated("On this Mac"),
+            .cloud => translated("On Cloud"),
+            .space => |i| if (i < cloud.spaces.len) cloud.spaces[i].name else translated("On Cloud"),
+            .settings => translated("Settings"),
         },
     };
     if (menu) |m| st.menu = .{
@@ -817,18 +838,18 @@ fn menuItems(of: @FieldType(@typeInfo(@TypeOf(menu)).optional.child, "of")) []co
 fn projectMenu() []const home.MenuItem {
     const list = [_]home.MenuItem{
         .{
-            .title = "Open",
+            .title = translated("Open"),
             .tag = Action.open_project,
         },
         .{
-            .title = "View live site",
+            .title = translated("View live site"),
             .tag = Action.view_live,
         },
         .{
             .separator = true,
         },
         .{
-            .title = "Open in dashboard",
+            .title = translated("Open in dashboard"),
             .tag = Action.project_dashboard,
         },
     };
@@ -839,18 +860,18 @@ fn projectMenu() []const home.MenuItem {
 fn accountMenu() []const home.MenuItem {
     const list = [_]home.MenuItem{
         .{
-            .title = "Open dashboard",
+            .title = translated("Open dashboard"),
             .tag = Action.open_dashboard,
         },
         .{
-            .title = "Settings…",
+            .title = translated("Settings…"),
             .tag = Action.settings,
         },
         .{
             .separator = true,
         },
         .{
-            .title = "Sign out",
+            .title = translated("Sign out"),
             .tag = Action.sign_out,
         },
     };
@@ -868,43 +889,43 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
         const state = syncing.stateOf(name) orelse .checking;
         const linked = [_]home.MenuItem{
             .{
-                .title = "Open",
+                .title = translated("Open"),
                 .tag = Action.open,
             },
             .{
-                .title = "Send changes to Cloud",
+                .title = translated("Send changes to Cloud"),
                 .tag = Action.send_changes,
                 .enabled = state == .unsent,
             },
             .{
-                .title = "Open review",
+                .title = translated("Open review"),
                 .tag = Action.open_review,
                 .enabled = syncing.reviewOf(name) != null,
             },
             .{
-                .title = "Open copy on this Mac",
+                .title = translated("Open copy on this Mac"),
                 .tag = Action.preview_changes,
             },
             .{
-                .title = "View live site",
+                .title = translated("View live site"),
                 .tag = Action.view_live_local,
             },
             .{
                 .separator = true,
             },
             .{
-                .title = "Show in Finder",
+                .title = translated("Show in Finder"),
                 .tag = Action.finder,
             },
             .{
-                .title = "Copy path",
+                .title = translated("Copy path"),
                 .tag = Action.copy_path,
             },
             .{
                 .separator = true,
             },
             .{
-                .title = "Remove from this Mac",
+                .title = translated("Remove from this Mac"),
                 .tag = Action.trash,
             },
         };
@@ -913,40 +934,40 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
     }
     const list = [_]home.MenuItem{
         .{
-            .title = "Open",
+            .title = translated("Open"),
             .tag = Action.open,
         },
         .{
-            .title = "View site",
+            .title = translated("View site"),
             .tag = Action.view_site,
         },
         .{
-            .title = "Deploy to Cloud",
+            .title = translated("Deploy to Cloud"),
             .tag = Action.deploy,
         },
         .{
             .separator = true,
         },
         .{
-            .title = "Show in Finder",
+            .title = translated("Show in Finder"),
             .tag = Action.finder,
         },
         .{
-            .title = "Copy path",
+            .title = translated("Copy path"),
             .tag = Action.copy_path,
         },
         if (s.running) .{
-            .title = "Stop",
+            .title = translated("Stop"),
             .tag = Action.stop,
         } else .{
-            .title = "Start",
+            .title = translated("Start"),
             .tag = Action.start,
         },
         .{
             .separator = true,
         },
         .{
-            .title = "Move to Trash",
+            .title = translated("Move to Trash"),
             .tag = Action.trash,
         },
     };
@@ -995,7 +1016,7 @@ fn onEvent(_: ?*anyopaque, win: *native.Window, event: native.Event) void {
                 redrawAll();
             }
         } else if (menu == null) {
-            const max = home.maxScroll(homeState());
+            const max = if (view == .settings) settings.maxScroll(settingsState(), u) else home.maxScroll(homeState());
             const dy: f32 = @floatCast(if (sc.precise) sc.dy else sc.dy * 10);
             const next = std.math.clamp(scroll - dy, 0, max);
             if (next != scroll) {
@@ -1784,7 +1805,7 @@ fn adminState(fields: *[1]sheet.Field) sheet.State {
     const size = window.size();
     const problem = adminProblem(admin_field.value());
     fields[0] = .{
-        .label = "Email",
+        .label = translated("Email"),
         .field = &admin_field,
         .placeholder = "you@example.com",
         .note = if (sheet_error) |e| .{
@@ -1796,12 +1817,12 @@ fn adminState(fields: *[1]sheet.Field) sheet.State {
         } else null,
     };
     return .{
-        .title = "Default account email",
-        .description = "Every project you make gets this account, so it opens with you signed in. Without one, each project asks you to make an account the first time you open its admin.",
+        .title = translated("Default account email"),
+        .description = translated("Every project you make gets this account, so it opens with you signed in. Without one, each project asks you to make an account the first time you open its admin."),
         .description_height = 58,
-        .link = "How accounts work",
+        .link = translated("How accounts work"),
         .fields = fields[0..1],
-        .primary = "Save",
+        .primary = translated("Save"),
         .primary_enabled = problem == null,
         .hover = sheet_hover,
         .window_width = @floatCast(size.w),
@@ -1812,7 +1833,7 @@ fn adminState(fields: *[1]sheet.Field) sheet.State {
 fn saveAdmin() void {
     if (adminProblem(admin_field.value()) != null) return;
     if (!sites.setDefaultAdmin(admin_field.value())) {
-        sheet_error = "The setting could not be saved.";
+        sheet_error = translated("The setting could not be saved.");
         return redrawAll();
     }
     closeSheet();
@@ -1832,19 +1853,19 @@ fn closeSheet() void {
 /// hostname label), or null. The reasons say which part of the rule it breaks.
 fn nameProblem(name: []const u8) ?[]const u8 {
     if (name.len == 0) return "";
-    if (name.len > 40) return "At most 40 characters.";
-    if (!std.ascii.isLower(name[0])) return "Start with a lowercase letter.";
-    for (name) |ch| if (!std.ascii.isLower(ch) and !std.ascii.isDigit(ch) and ch != '-') return "Lowercase letters, numbers and dashes only.";
-    if (name[name.len - 1] == '-' or std.mem.indexOf(u8, name, "--") != null) return "No dash at the end, and no two in a row.";
-    if (!core.sites.valid_name(name)) return "Lowercase letters, numbers and dashes only.";
-    if (sites.find(name) != null) return "A site with this name is on this Mac already.";
+    if (name.len > 40) return translated("At most 40 characters.");
+    if (!std.ascii.isLower(name[0])) return translated("Start with a lowercase letter.");
+    for (name) |ch| if (!std.ascii.isLower(ch) and !std.ascii.isDigit(ch) and ch != '-') return translated("Lowercase letters, numbers and dashes only.");
+    if (name[name.len - 1] == '-' or std.mem.indexOf(u8, name, "--") != null) return translated("No dash at the end, and no two in a row.");
+    if (!core.sites.valid_name(name)) return translated("Lowercase letters, numbers and dashes only.");
+    if (sites.find(name) != null) return translated("A site with this name is on this Mac already.");
     return null;
 }
 
 fn adminProblem(email: []const u8) ?[]const u8 {
     if (email.len == 0) return null;
-    const at = std.mem.indexOfScalar(u8, email, '@') orelse return "Not an email address.";
-    if (at == 0 or at == email.len - 1 or std.mem.indexOfAny(u8, email, " \t") != null) return "Not an email address.";
+    const at = std.mem.indexOfScalar(u8, email, '@') orelse return translated("Not an email address.");
+    if (at == 0 or at == email.len - 1 or std.mem.indexOfAny(u8, email, " \t") != null) return translated("Not an email address.");
     return null;
 }
 
@@ -1855,11 +1876,22 @@ fn sheetState(fields: *[1]sheet.Field) sheet.State {
     if (open_sheet == .deployed) return deployedState();
     var state = if (new_where == .cloud and cloudOffered()) projectState(fields) else localState(fields);
     if (cloudOffered()) state.choice = .{
-        .label = "Where",
-        .options = &.{ "On this Mac", "On Cloud" },
+        .label = translated("Where"),
+        .options = whereOptions(),
         .selected = @backingInt(new_where),
     };
     return state;
+}
+
+/// Where a new project goes, as the sheet offers it (kept here: the sheet holds the slice).
+var where_options: [2][]const u8 = undefined;
+
+fn whereOptions() []const []const u8 {
+    where_options = .{
+        translated("On this Mac"),
+        translated("On Cloud"),
+    };
+    return &where_options;
 }
 
 fn localState(fields: *[1]sheet.Field) sheet.State {
@@ -1867,7 +1899,7 @@ fn localState(fields: *[1]sheet.Field) sheet.State {
     const name = name_field.value();
     const problem = nameProblem(name);
     fields[0] = .{
-        .label = "Name",
+        .label = translated("Name"),
         .field = &name_field,
         .placeholder = "my-site",
         .note = if (sheet_error) |e| .{
@@ -1877,16 +1909,16 @@ fn localState(fields: *[1]sheet.Field) sheet.State {
             .text = pr,
             .kind = .bad,
         } else sheet.Note{
-            .text = "Lowercase letters, numbers and dashes. It is also the folder's name.",
+            .text = translated("Lowercase letters, numbers and dashes. It is also the folder's name."),
         }) else sheet.Note{
-            .text = "Lowercase letters, numbers and dashes. It is also the folder's name.",
+            .text = translated("Lowercase letters, numbers and dashes. It is also the folder's name."),
         },
     };
     return .{
-        .title = "New project",
-        .description = "A project on this Mac, with the starter page. Deploy it to Publr Cloud whenever you like.",
+        .title = translated("New project"),
+        .description = translated("A project on this Mac, with the starter page. Deploy it to Publr Cloud whenever you like."),
         .fields = fields[0..1],
-        .primary = "Create project",
+        .primary = translated("Create project"),
         .primary_enabled = problem == null,
         .busy = sheet_busy,
         .hover = sheet_hover,
@@ -2037,48 +2069,54 @@ fn deployState(fields: *[1]sheet.Field) sheet.State {
     const domain = cloud.projectDomain(&db);
     const suffix = std.fmt.allocPrint(frame_arena.allocator(), ".{s}", .{domain}) catch ".publr.app";
     const space_name = if (cloud.spaces.len > 0) cloud.spaces[0].name else "";
-    const in_space = std.fmt.allocPrint(frame_arena.allocator(), "In {s}.", .{space_name}) catch "";
+    const in_space = filled(frame_arena.allocator(), translated("In {space}."), .{
+        .space = space_name,
+    }) catch "";
     const note: sheet.Note = if (sheet_error) |e| .{
         .text = e,
         .kind = .bad,
     } else if (availability) |av| switch (av) {
         .available => .{
-            .text = "Available.",
+            .text = translated("Available."),
             .kind = .good,
         },
         .taken => .{
-            .text = "Taken. Try another address.",
+            .text = translated("Taken. Try another address."),
             .kind = .bad,
         },
         .reserved => .{
-            .text = "Reserved by Publr. Try another address.",
+            .text = translated("Reserved by Publr. Try another address."),
             .kind = .bad,
         },
         .invalid => .{
-            .text = "Lowercase letters, numbers and dashes, at least 3.",
+            .text = translated("Lowercase letters, numbers and dashes, at least 3."),
             .kind = .bad,
         },
         .unknown => .{
-            .text = "Publr Cloud could not be asked. Check your connection.",
+            .text = translated("Publr Cloud could not be asked. Check your connection."),
             .kind = .bad,
         },
     } else .{
-        .text = if (address_field.value().len == 0) "The address your site will be live at." else "Checking…",
+        .text = if (address_field.value().len == 0) translated("The address your site will be live at.") else translated("Checking…"),
     };
     fields[0] = .{
-        .label = "Address",
+        .label = translated("Address"),
         .field = &address_field,
         .placeholder = "my-site",
         .suffix = suffix,
         .note = note,
     };
-    const title = std.fmt.allocPrint(frame_arena.allocator(), "Deploy \u{201c}{s}\u{201d} to Publr Cloud", .{deploy_site}) catch "Deploy to Publr Cloud";
-    const desc = std.fmt.allocPrint(frame_arena.allocator(), "The site goes live at the address below. This Mac keeps it as its working copy. {s}", .{in_space}) catch "";
+    const title = filled(frame_arena.allocator(), translated("Deploy \u{201c}{name}\u{201d} to Publr Cloud"), .{
+        .name = deploy_site,
+    }) catch translated("Deploy to Publr Cloud");
+    const desc = filled(frame_arena.allocator(), translated("The site goes live at the address below. This Mac keeps it as its working copy. {space}"), .{
+        .space = in_space,
+    }) catch "";
     return .{
         .title = title,
         .description = desc,
         .fields = fields[0..1],
-        .primary = "Deploy",
+        .primary = translated("Deploy"),
         .primary_enabled = availability == .available,
         .busy = if (deploy_job != null) deployBusyText() else sheet_busy,
         .hover = sheet_hover,
@@ -2120,7 +2158,7 @@ fn startDeploy() void {
     deploy_progress = .{};
     deploy_job = job;
     sheet_error = null;
-    sheet_busy = "Packing the site…";
+    sheet_busy = translated("Packing the site…");
     window.setTextInput(false);
     job.start() catch {
         deploy_job = null;
@@ -2133,12 +2171,16 @@ fn startDeploy() void {
 fn deployBusyText() []const u8 {
     const a = frame_arena.allocator();
     return switch (deploy_progress.get()) {
-        .packing => "Packing the site…",
-        .uploading => std.fmt.allocPrint(a, "Uploading… {d:.1} of {d:.1} MB", .{
-            @as(f64, @floatFromInt(deploy_progress.sent.load(.acquire))) / 1e6,
-            @as(f64, @floatFromInt(deploy_progress.total.load(.acquire))) / 1e6,
-        }) catch "Uploading…",
-        .starting => "Starting it on Publr Cloud…",
+        .packing => translated("Packing the site…"),
+        .uploading => uploading: {
+            var sent: [32]u8 = undefined;
+            var total: [32]u8 = undefined;
+            break :uploading filled(a, translated("Uploading… {sent} of {total} MB"), .{
+                .sent = std.fmt.bufPrint(&sent, "{d:.1}", .{@as(f64, @floatFromInt(deploy_progress.sent.load(.acquire))) / 1e6}) catch "",
+                .total = std.fmt.bufPrint(&total, "{d:.1}", .{@as(f64, @floatFromInt(deploy_progress.total.load(.acquire))) / 1e6}) catch "",
+            }) catch translated("Uploading…");
+        },
+        .starting => translated("Starting it on Publr Cloud…"),
         .done, .failed => "",
     };
 }
@@ -2195,12 +2237,16 @@ fn deployedState() sheet.State {
     const size = window.size();
     const a = frame_arena.allocator();
     return .{
-        .title = std.fmt.allocPrint(a, "{s} is live", .{deploy_site}) catch "Live",
-        .description = std.fmt.allocPrint(a, "At {s}. This Mac keeps the site as its working copy; a domain of your own can be connected in the dashboard.", .{deployed_address}) catch "",
+        .title = filled(a, translated("{name} is live"), .{
+            .name = deploy_site,
+        }) catch translated("Live"),
+        .description = filled(a, translated("At {address}. This Mac keeps the site as its working copy; a domain of your own can be connected in the dashboard."), .{
+            .address = deployed_address,
+        }) catch "",
         .fields = &.{},
-        .primary = "View live site",
+        .primary = translated("View live site"),
         .primary_enabled = true,
-        .secondary = "Close",
+        .secondary = translated("Close"),
         .hover = sheet_hover,
         .window_width = @floatCast(size.w),
         .window_height = @floatCast(size.h),
@@ -2216,7 +2262,7 @@ fn createSite() void {
         .name = gpa.dupe(u8, name_field.value()) catch return,
         .admin = gpa.dupe(u8, defaultAccount()) catch return,
     };
-    sheet_busy = "Making the site…";
+    sheet_busy = translated("Making the site…");
     redrawAll();
     native.spawn(NewSite.run, .{job}) catch return;
 }
@@ -2227,7 +2273,7 @@ fn createSite() void {
 fn projectNameProblem(name: []const u8) ?[]const u8 {
     const trimmed = std.mem.trim(u8, name, " ");
     if (trimmed.len == 0) return "";
-    if (trimmed.len > 60) return "At most 60 characters.";
+    if (trimmed.len > 60) return translated("At most 60 characters.");
     return null;
 }
 
@@ -2237,12 +2283,12 @@ fn projectState(fields: *[1]sheet.Field) sheet.State {
     const space = cloud.spaces[targetSpace()].name;
     const problem = projectNameProblem(name_field.value());
     const usual: sheet.Note = .{
-        .text = "Its address is made from the name, with six random characters.",
+        .text = translated("Its address is made from the name, with six random characters."),
     };
     fields[0] = .{
-        .label = "Name",
+        .label = translated("Name"),
         .field = &name_field,
-        .placeholder = "My project",
+        .placeholder = translated("My project"),
         .note = if (sheet_error) |e| .{
             .text = e,
             .kind = .bad,
@@ -2252,10 +2298,12 @@ fn projectState(fields: *[1]sheet.Field) sheet.State {
         } else usual) else usual,
     };
     return .{
-        .title = "New project",
-        .description = std.fmt.allocPrint(a, "A project on Publr Cloud, in {s}, with the starter page.", .{space}) catch "",
+        .title = translated("New project"),
+        .description = filled(a, translated("A project on Publr Cloud, in {space}, with the starter page."), .{
+            .space = space,
+        }) catch "",
         .fields = fields[0..1],
-        .primary = "Create project",
+        .primary = translated("Create project"),
         .primary_enabled = problem == null,
         .busy = sheet_busy,
         .hover = sheet_hover,
@@ -2268,7 +2316,7 @@ fn createProject() void {
     if (sheet_busy != null or projectNameProblem(name_field.value()) != null) return;
     if (!cloudOffered()) return;
     const i = targetSpace();
-    sheet_busy = "Making the project…";
+    sheet_busy = translated("Making the project…");
     redrawAll();
     cloud.createProject(cloud.spaces[i].slug, std.mem.trim(u8, name_field.value(), " "), projectMade);
 }
@@ -2307,7 +2355,7 @@ const NewSite = struct {
         }
         sheet_busy = null;
         if (!self.ok) {
-            sheet_error = "The site could not be made. See Console for p's message.";
+            sheet_error = translated("The site could not be made. See Console for p's message.");
             return redrawAll();
         }
         closeSheet();
@@ -2380,8 +2428,8 @@ fn projectPage(i: usize) project.State {
         .kind = kind,
         .status = if (pt.note.len > 0) pt.note else switch (kind) {
             .both => syncing.labelOf(pt.folder, state, a.alloc(u8, 128) catch &.{}),
-            .local => if (local.?.running) "Running on this Mac" else "Stopped",
-            .cloud => "Live on Cloud",
+            .local => if (local.?.running) translated("Running on this Mac") else translated("Stopped"),
+            .cloud => translated("Live on Cloud"),
         },
         .running = if (kind == .local) local.?.running else state != .failed,
         .changed = kind == .both and (state == .unsent or state == .waiting),
@@ -2467,7 +2515,8 @@ fn openSite(name: []const u8) void {
     // A folder linked to Cloud has two tabs of the same name: this one is the local admin's.
     for (tabs.items, 0..) |t, i| if (t.url == null and t.project == null and std.mem.eql(u8, t.name, name)) return showTab(i);
     const web = window.addWebView() catch return;
-    web.loadHtml(starting_page);
+    var page: [1024]u8 = undefined;
+    web.loadHtml(std.fmt.bufPrintSentinel(&page, starting_page, .{translated("Starting the site…")}, 0) catch "");
     const owned = gpa.dupe(u8, name) catch return;
     tabs.append(gpa, .{
         .name = owned,
@@ -2506,10 +2555,11 @@ fn closeTab(i: usize) void {
     redrawAll();
 }
 
+/// A tab's page while its site starts; `{s}` is the words, in the person's language.
 const starting_page =
     \\<!doctype html><meta charset=utf-8>
     \\<body style="margin:0;height:100vh;display:grid;place-items:center;font:13px -apple-system,sans-serif;color:#888;background:#fff">
-    \\<p>Starting the site…</p>
+    \\<p>{s}</p>
 ;
 
 // A project elsewhere: its apps listed, or the project cloned here, off the main thread.
@@ -2582,7 +2632,8 @@ const RemoteJob = struct {
         var err_reader = child.stderr.?.readerStreaming(io, &errors);
         const said = err_reader.interface.allocRemaining(a, .limited(1 << 16)) catch "";
         const term = child.wait(io) catch {
-            self.line = "Clone failed";
+            // Said where it is drawn, in the person's language.
+            self.line = "";
             return;
         };
         self.ok = term == .exited and term.exited == 0;
@@ -2626,7 +2677,7 @@ const RemoteJob = struct {
             .clone => {
                 pt.cloning = false;
                 if (!self.ok) {
-                    pt.note = pt.arena.allocator().dupe(u8, if (self.line.len > 0) self.line else "Clone failed") catch "";
+                    pt.note = pt.arena.allocator().dupe(u8, if (self.line.len > 0) self.line else translated("Clone failed")) catch "";
                 } else {
                     pt.note = "";
                     refreshSites();
@@ -2699,7 +2750,7 @@ fn remoteSignedOn(signed: @import("cloud.zig").SignedOn) void {
         } else if (remoteTab(waiting.live)) |pt| {
             pt.cloning = false;
             pt.apps_loading = false;
-            if (waiting.kind == .clone) pt.note = "Sign-in failed";
+            if (waiting.kind == .clone) pt.note = translated("Sign-in failed");
         }
     }
     redrawAll();
@@ -2960,7 +3011,7 @@ fn loadAppLanguage() void {
 fn openLanguageSheet(of: @TypeOf(language_of)) void {
     language_of = of;
     language_pick = switch (of) {
-        .app => @intFromEnum(app_language),
+        .app => @backingInt(app_language),
         .projects => for (project_languages, 0..) |l, i| {
             if (std.mem.eql(u8, l.code, settings_language)) break i;
         } else 0,
@@ -2971,19 +3022,36 @@ fn openLanguageSheet(of: @TypeOf(language_of)) void {
     redrawAll();
 }
 
+/// The languages the sheet offers (kept here: the sheet holds the slice).
+var language_options: [3][]const u8 = undefined;
+
+fn languageOptions(app: bool) []const []const u8 {
+    if (!app) {
+        language_options[0] = "English";
+        language_options[1] = "Polski";
+        return language_options[0..2];
+    }
+    language_options = .{
+        i18n.Choice.system.label(),
+        "English",
+        "Polski",
+    };
+    return &language_options;
+}
+
 fn languageState() sheet.State {
     const size = window.size();
     const app = language_of == .app;
     return .{
-        .title = if (app) "Publr Desktop's language" else "New projects' language",
-        .description = if (app) "The language Publr Desktop speaks to you." else "Every project you make starts in this language: its admin speaks it, and its first account too.",
+        .title = if (app) translated("Publr Desktop's language") else translated("New projects' language"),
+        .description = if (app) translated("The language Publr Desktop speaks to you.") else translated("Every project you make starts in this language: its admin speaks it, and its first account too."),
         .choice = .{
-            .label = "Language",
-            .options = if (app) &.{ i18n.Choice.system.label(), "English", "Polski" } else &.{ "English", "Polski" },
+            .label = translated("Language"),
+            .options = languageOptions(app),
             .selected = language_pick,
         },
         .fields = &.{},
-        .primary = "Save",
+        .primary = translated("Save"),
         .primary_enabled = true,
         .hover = sheet_hover,
         .window_width = @floatCast(size.w),
@@ -2994,13 +3062,13 @@ fn languageState() sheet.State {
 fn saveLanguage() void {
     switch (language_of) {
         .app => {
-            const choice: i18n.Choice = @enumFromInt(language_pick);
+            const choice: i18n.Choice = @fromBackingInt(@intCast(language_pick));
             var pb: [1024]u8 = undefined;
             Io.Dir.cwd().writeFile(io, .{
                 .sub_path = appLanguagePath(&pb),
                 .data = @tagName(choice),
             }) catch {
-                sheet_error = "The setting could not be saved.";
+                sheet_error = translated("The setting could not be saved.");
                 return redrawAll();
             };
             app_language = choice;
@@ -3011,12 +3079,12 @@ fn saveLanguage() void {
             var arena: std.heap.ArenaAllocator = .init(gpa);
             defer arena.deinit();
             var config = core.Config.load(io, arena.allocator(), env_map) catch {
-                sheet_error = "The setting could not be saved.";
+                sheet_error = translated("The setting could not be saved.");
                 return redrawAll();
             };
             config.language = project_languages[language_pick].code;
             config.save() catch {
-                sheet_error = "The setting could not be saved.";
+                sheet_error = translated("The setting could not be saved.");
                 return redrawAll();
             };
         },
@@ -3050,7 +3118,7 @@ fn loadSettings() void {
     _ = settings_arena.reset(.retain_capacity);
     const a = settings_arena.allocator();
     const config = core.Config.load(io, a, env_map) catch |e| {
-        settings_problem = "The settings could not be read.";
+        settings_problem = translated("The settings could not be read.");
         return std.debug.print("desktop: settings: {t}\n", .{e});
     };
     settings_folder = shortFolder(a, config.folder);
@@ -3063,12 +3131,11 @@ fn loadSettings() void {
     settings_language = config.language;
 }
 
-
 /// Settings' admin for new sites, as people read it.
 fn settingsAdmin() []const u8 {
     if (settings_admin.len > 0) return settings_admin;
     if (cloud.status == .signed_in and cloud.account_email.len > 0) return cloud.account_email;
-    return "Not set";
+    return translated("Not set");
 }
 
 fn settingsState() settings.State {
@@ -3086,6 +3153,7 @@ fn settingsState() settings.State {
         .project_language = projectLanguageLabel(settings_language),
         .tools = tools.rows(&tool_rows),
         .advanced = settings_advanced,
+        .scroll = scroll,
         .busy = settings_busy,
         .problem = settings_problem,
         .hover = switch (hover) {
@@ -3104,7 +3172,10 @@ fn clickSettings(t: settings.Target) void {
         .connect_tool => |tool| tools.connect(tool),
         .add_folder => chooseFolder(.add),
         .remove_folder => |i| removeFolder(i),
-        .advanced => settings_advanced = !settings_advanced,
+        .advanced => {
+            settings_advanced = !settings_advanced;
+            scroll = @min(scroll, settings.maxScroll(settingsState(), u));
+        },
         .choose_publr => choosePublr(null, false),
         .clear_publr => choosePublr(null, true),
         .none => {},
@@ -3118,18 +3189,18 @@ fn changeConfig(change: *const fn (*core.Config) anyerror!void) void {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     defer arena.deinit();
     var config = core.Config.load(io, arena.allocator(), env_map) catch {
-        settings_problem = "The settings could not be read.";
+        settings_problem = translated("The settings could not be read.");
         return redrawAll();
     };
     change(&config) catch |e| {
         settings_problem = switch (e) {
-            error.TooManyFolders => "That is as many folders as Desktop lists.",
-            else => "The settings could not be saved.",
+            error.TooManyFolders => translated("That is as many folders as Desktop lists."),
+            else => translated("The settings could not be saved."),
         };
         return redrawAll();
     };
     config.save() catch {
-        settings_problem = "The settings could not be saved.";
+        settings_problem = translated("The settings could not be saved.");
         return redrawAll();
     };
     settings_problem = null;
@@ -3147,11 +3218,12 @@ const FolderFor = enum {
 /// same panel apps open.
 const ChooseFolder = struct {
     purpose: FolderFor,
+    /// The panel's words, in the person's language (chosen on the main thread).
+    prompt: []const u8,
     chosen: []u8 = &.{},
 
     fn run(job: *ChooseFolder) void {
-        const prompt = if (job.purpose == .default) "Where new sites go" else "A folder of sites, or a site's folder";
-        const script = std.fmt.allocPrint(gpa, "POSIX path of (choose folder with prompt \"{s}\")", .{prompt}) catch return native.runOnMain(job, finish);
+        const script = std.fmt.allocPrint(gpa, "POSIX path of (choose folder with prompt \"{s}\")", .{job.prompt}) catch return native.runOnMain(job, finish);
         defer gpa.free(script);
         const result = std.process.run(gpa, io, .{
             .argv = &.{ "osascript", "-e", script },
@@ -3200,8 +3272,9 @@ fn chooseFolder(purpose: FolderFor) void {
     const job = gpa.create(ChooseFolder) catch return;
     job.* = .{
         .purpose = purpose,
+        .prompt = if (purpose == .default) translated("Where new sites go") else translated("A folder of sites, or a site's folder"),
     };
-    settings_busy = "Choosing a folder…";
+    settings_busy = translated("Choosing a folder…");
     redrawAll();
     native.spawn(ChooseFolder.run, .{job}) catch {
         settings_busy = null;
@@ -3229,6 +3302,8 @@ const ChoosePublr = struct {
     /// The project's site; null for every site.
     name: ?[]u8,
     clear: bool,
+    /// The panel's words, in the person's language (chosen on the main thread).
+    prompt: []const u8,
     failed: bool = false,
 
     fn run(job: *ChoosePublr) void {
@@ -3236,8 +3311,10 @@ const ChoosePublr = struct {
         var path: []u8 = &.{};
         defer gpa.free(path);
         if (!job.clear) {
+            const script = std.fmt.allocPrint(gpa, "POSIX path of (choose file with prompt \"{s}\")", .{job.prompt}) catch return;
+            defer gpa.free(script);
             const result = std.process.run(gpa, io, .{
-                .argv = &.{ "osascript", "-e", "POSIX path of (choose file with prompt \"Choose a publr binary\")" },
+                .argv = &.{ "osascript", "-e", script },
             }) catch return;
             defer gpa.free(result.stderr);
             defer gpa.free(result.stdout);
@@ -3260,7 +3337,7 @@ const ChoosePublr = struct {
         }
         if (job.name == null) {
             settings_busy = null;
-            settings_problem = if (job.failed) "That Publr could not be used." else null;
+            settings_problem = if (job.failed) translated("That Publr could not be used.") else null;
             loadSettings();
         }
         refreshSites();
@@ -3274,9 +3351,10 @@ fn choosePublr(name: ?[]const u8, clear: bool) void {
     job.* = .{
         .name = if (name) |n| gpa.dupe(u8, n) catch return gpa.destroy(job) else null,
         .clear = clear,
+        .prompt = translated("Choose a publr binary"),
     };
     if (name == null) {
-        settings_busy = if (clear) "Going back to each site's release…" else "Choosing a Publr…";
+        settings_busy = if (clear) translated("Going back to each site's release…") else translated("Choosing a Publr…");
         redrawAll();
     }
     native.spawn(ChoosePublr.run, .{job}) catch {

@@ -9,6 +9,8 @@
 
 const std = @import("std");
 const native = @import("native");
+const i18n = @import("i18n.zig");
+const translated = i18n.translated;
 
 pub const State = enum {
     checking,
@@ -25,14 +27,14 @@ pub const State = enum {
     /// What the card says.
     pub fn text(s: State) []const u8 {
         return switch (s) {
-            .checking => "Checking\u{2026}",
-            .up_to_date => "Up to date",
-            .updating => "Updating from Cloud\u{2026}",
-            .unsent => "Changes not on Cloud yet",
-            .sending => "Sending to Cloud\u{2026}",
-            .waiting => "Sent for review",
-            .signing_in => "Signing in\u{2026}",
-            .failed => "Couldn\u{2019}t reach Cloud",
+            .checking => translated("Checking\u{2026}"),
+            .up_to_date => translated("Up to date"),
+            .updating => translated("Updating from Cloud\u{2026}"),
+            .unsent => translated("Changes not on Cloud yet"),
+            .sending => translated("Sending to Cloud\u{2026}"),
+            .waiting => translated("Sent for review"),
+            .signing_in => translated("Signing in\u{2026}"),
+            .failed => translated("Couldn\u{2019}t reach Cloud"),
         };
     }
 };

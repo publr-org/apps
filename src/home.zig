@@ -11,6 +11,9 @@ const ui = @import("ui");
 const icons = @import("publr_icons");
 const mark = @import("mark.zig");
 const Theme = @import("theme.zig").Theme;
+const i18n = @import("i18n.zig");
+const translated = i18n.translated;
+const translated_count = i18n.translated_count;
 const centred = @import("bar.zig").centred;
 
 pub const sidebar_width: f32 = 240;
@@ -392,10 +395,12 @@ const button_text: ui.TextStyle = .{
     .weight = 500,
 };
 
-const new_label = "New project";
+fn newLabel() []const u8 {
+    return translated("New project");
+}
 
 fn newSiteRect(s: State, u: *ui.Ui) ui.Rect {
-    const w = u.measure(new_label, button_text) + 28 + 22;
+    const w = u.measure(newLabel(), button_text) + 28 + 22;
     return .{
         .x = s.width - pad - w,
         .y = s.top + header_height + 30,
@@ -592,9 +597,9 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
 
     var buf: [16]u8 = undefined;
     var all_buf: [16]u8 = undefined;
-    try navItem(u, t, navRect(s, 0), icons.clock_rewind, "Recent", null, s.view == .recents, same(s.hover, .recents));
-    try navItem(u, t, navRect(s, 1), icons.layout_grid, "All projects", std.fmt.bufPrint(&all_buf, "{d}", .{s.all_count}) catch null, s.view == .all, same(s.hover, .all));
-    try navItem(u, t, navRect(s, 2), icons.device_desktop, "On this Mac", std.fmt.bufPrint(&buf, "{d}", .{s.local_count}) catch null, s.view == .local, same(s.hover, .local));
+    try navItem(u, t, navRect(s, 0), icons.clock_rewind, translated("Recent"), null, s.view == .recents, same(s.hover, .recents));
+    try navItem(u, t, navRect(s, 1), icons.layout_grid, translated("All projects"), std.fmt.bufPrint(&all_buf, "{d}", .{s.all_count}) catch null, s.view == .all, same(s.hover, .all));
+    try navItem(u, t, navRect(s, 2), icons.device_desktop, translated("On this Mac"), std.fmt.bufPrint(&buf, "{d}", .{s.local_count}) catch null, s.view == .local, same(s.hover, .local));
 
     const label = cloudLabelRect(s);
     try u.text(.{
@@ -602,7 +607,7 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = label.y + 20,
         .w = label.w - 20,
         .h = 16,
-    }, "Cloud", .{
+    }, translated("Cloud"), .{
         .size = 10,
         .weight = 600,
         .color = t.text2,
@@ -611,7 +616,7 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
     });
     if (s.account == .signed_in) {
         var on_cloud: [16]u8 = undefined;
-        try navItem(u, t, cloudRowRect(s, 0), icons.globe, "On Cloud", std.fmt.bufPrint(&on_cloud, "{d}", .{s.cloud_count}) catch null, s.view == .cloud, same(s.hover, .cloud));
+        try navItem(u, t, cloudRowRect(s, 0), icons.globe, translated("On Cloud"), std.fmt.bufPrint(&on_cloud, "{d}", .{s.cloud_count}) catch null, s.view == .cloud, same(s.hover, .cloud));
         for (s.spaces[0..spacesListed(s)], 0..) |sp, i| {
             var cb: [16]u8 = undefined;
             const selected = switch (s.view) {
@@ -627,12 +632,12 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
             .y = r.y,
             .w = r.w - 20,
             .h = r.h,
-        }, "Sign in to see your Cloud projects", .{
+        }, translated("Sign in to see your Cloud projects"), .{
             .size = 12,
             .color = t.text2,
         });
     }
-    try navItem(u, t, settingsRect(s), icons.settings, "Settings", null, s.view == .settings, same(s.hover, .settings));
+    try navItem(u, t, settingsRect(s), icons.settings, translated("Settings"), null, s.view == .settings, same(s.hover, .settings));
     try drawAccount(u, s, t);
 }
 
@@ -679,8 +684,8 @@ fn drawAccount(u: *ui.Ui, s: State, t: *const Theme) !void {
                 .h = 16,
             }, icons.chevron_up, t.text2);
         },
-        .signed_out => try secondaryButton(u, t, a, "Sign in to Publr Cloud", same(s.hover, .sign_in)),
-        .signing_in => try u.text(a, "Signing in in your browser…", .{
+        .signed_out => try secondaryButton(u, t, a, translated("Sign in to Publr Cloud"), same(s.hover, .sign_in)),
+        .signing_in => try u.text(a, translated("Signing in in your browser…"), .{
             .size = 12,
             .color = t.text2,
             .@"align" = .center,
@@ -744,7 +749,8 @@ fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
         .size = 13,
         .color = t.text2,
     };
-    const first = u.measure("Projects", crumb);
+    const projects = translated("Projects");
+    const first = u.measure(projects, crumb);
     const slash = u.measure("/", crumb);
     var x = sidebar_width + pad;
     try u.text(.{
@@ -752,7 +758,7 @@ fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = s.top,
         .w = first,
         .h = header_height,
-    }, "Projects", crumb);
+    }, projects, crumb);
     x += first + 8;
     try u.text(.{
         .x = x,
@@ -811,7 +817,7 @@ fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
 /// The page's title and how many projects it holds, with New project: the admin's page head.
 fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
     const x = sidebar_width + pad;
-    const w = s.width - x - pad - 140;
+    const w = @max(0, newSiteRect(s, u).x - x - 16);
     try u.text(.{
         .x = x,
         .y = s.top + header_height + 24,
@@ -823,14 +829,14 @@ fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
         .color = t.text,
         .tracking = -0.56,
     });
-    var buf: [32]u8 = undefined;
-    const noun = if (s.items.len == 1) "project" else "projects";
+    var buf: [64]u8 = undefined;
+    const count_text = i18n.fill(&buf, translated_count("{count} project", "{count} projects", s.items.len), .{ .count = s.items.len });
     try u.text(.{
         .x = x,
         .y = s.top + header_height + 60,
         .w = w,
         .h = 20,
-    }, std.fmt.bufPrint(&buf, "{d} {s}", .{ s.items.len, noun }) catch "", .{
+    }, count_text, .{
         .size = 14,
         .color = t.text2,
     });
@@ -850,7 +856,7 @@ fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = n.y,
         .w = n.w - 36 - 14,
         .h = n.h,
-    }, new_label, .{
+    }, newLabel(), .{
         .size = button_text.size,
         .weight = button_text.weight,
         .color = t.on_primary,
@@ -861,11 +867,11 @@ fn drawContent(u: *ui.Ui, s: State, t: *const Theme) !void {
     const c = contentRect(s);
     if (s.items.len == 0) {
         const empty = switch (s.view) {
-            .recents => "Projects you open show up here.",
-            .all => "No projects yet. New project makes one.",
-            .local => "No projects on this Mac yet. New project makes one.",
-            .cloud => "No projects on Cloud yet. New project makes one there.",
-            .space => "No projects in this space yet. New project makes one.",
+            .recents => translated("Projects you open show up here."),
+            .all => translated("No projects yet. New project makes one."),
+            .local => translated("No projects on this Mac yet. New project makes one."),
+            .cloud => translated("No projects on Cloud yet. New project makes one there."),
+            .space => translated("No projects in this space yet. New project makes one."),
             .settings => "",
         };
         try u.text(.{

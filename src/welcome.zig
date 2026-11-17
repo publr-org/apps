@@ -12,6 +12,8 @@ const icons = @import("publr_icons");
 const Theme = @import("theme.zig").Theme;
 const mark = @import("mark.zig");
 const ai_tools = @import("ai_tools.zig");
+const i18n = @import("i18n.zig");
+const translated = i18n.translated;
 
 pub const Step = enum {
     start,
@@ -82,23 +84,28 @@ const Benefit = struct {
     line: []const u8,
 };
 
-const benefits = [_]Benefit{
-    .{
-        .icon = icons.user,
-        .title = "One account everywhere",
-        .line = "Every project, on this Mac and online, opens with you signed in.",
-    },
-    .{
-        .icon = icons.rocket,
-        .title = "Online in one click",
-        .line = "Put a project online and get its address in seconds.",
-    },
-    .{
-        .icon = icons.sync,
-        .title = "Your projects on any Mac",
-        .line = "Bring a Cloud project down to this Mac and work on it here.",
-    },
-};
+const benefit_count = 3;
+
+/// In the language spoken now, which can change while Desktop runs.
+fn benefits() [benefit_count]Benefit {
+    return .{
+        .{
+            .icon = icons.user,
+            .title = translated("One account everywhere"),
+            .line = translated("Every project, on this Mac and online, opens with you signed in."),
+        },
+        .{
+            .icon = icons.rocket,
+            .title = translated("Online in one click"),
+            .line = translated("Put a project online and get its address in seconds."),
+        },
+        .{
+            .icon = icons.sync,
+            .title = translated("Your projects on any Mac"),
+            .line = translated("Bring a Cloud project down to this Mac and work on it here."),
+        },
+    };
+}
 
 const Way = struct {
     choice: Choice,
@@ -107,20 +114,23 @@ const Way = struct {
     line: []const u8,
 };
 
-const ways = [_]Way{
-    .{
-        .choice = .by_hand,
-        .icon = icons.users,
-        .title = "Set up an account for every project",
-        .line = "Each project asks you to make its admin account the first time you open it.",
-    },
-    .{
-        .choice = .one_account,
-        .icon = icons.user,
-        .title = "One account for all projects",
-        .line = "Choose one email. Every project you make gets an account with it and opens with you signed in.",
-    },
-};
+/// In the language spoken now, which can change while Desktop runs.
+fn ways() [2]Way {
+    return .{
+        .{
+            .choice = .by_hand,
+            .icon = icons.users,
+            .title = translated("Set up an account for every project"),
+            .line = translated("Each project asks you to make its admin account the first time you open it."),
+        },
+        .{
+            .choice = .one_account,
+            .icon = icons.user,
+            .title = translated("One account for all projects"),
+            .line = translated("Choose one email. Every project you make gets an account with it and opens with you signed in."),
+        },
+    };
+}
 
 const width: f32 = 560;
 const panel_pad: f32 = 28;
@@ -132,8 +142,6 @@ const tile_height: f32 = 196;
 const tile_gap: f32 = 12;
 const field_height: f32 = 40;
 const tool_row_height: f32 = 68;
-const link_label = "How accounts work";
-const tools_link_label = "How building with AI works";
 /// Publr's mark, and the room under it.
 const mark_size: f32 = 40;
 const mark_step: f32 = mark_size + 20;
@@ -146,7 +154,7 @@ const button_text: ui.TextStyle = .{
 };
 
 fn panelHeight(s: State) f32 {
-    const rows: f32 = @floatFromInt(benefits.len);
+    const rows: f32 = @floatFromInt(benefit_count);
     const problem: f32 = if (s.cloud_problem != null) problem_step else 0;
     return panel_pad + 20 + 10 + 40 + 20 + rows * benefit_step + problem + 8 + button_height + panel_pad;
 }
@@ -278,7 +286,7 @@ fn confirmRect(s: State) ui.Rect {
 }
 
 fn linkLabel(s: State) []const u8 {
-    return if (s.step == .tools) tools_link_label else link_label;
+    return if (s.step == .tools) translated("How building with AI works") else translated("How accounts work");
 }
 
 fn linkRect(s: State, u: *ui.Ui) ui.Rect {
@@ -347,10 +355,10 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme, window: *native.Window) !void 
     }, mark.markup, t.text);
 
     const words: [2][]const u8 = switch (s.step) {
-        .start => .{ "Welcome to Publr Desktop", "Make websites and apps on your Mac, with the AI tool you already use." },
-        .without_cloud => .{ "Without Publr Cloud", "How should your projects' admin accounts be made?" },
-        .email => .{ "One account for all projects", "Every project you make gets an account with this email and opens with you signed in." },
-        .tools => .{ "Connect your AI tool", "Publr works inside the AI tool you use. Connect it once, for every project." },
+        .start => .{ translated("Welcome to Publr Desktop"), translated("Make websites and apps on your Mac, with the AI tool you already use.") },
+        .without_cloud => .{ translated("Without Publr Cloud"), translated("How should your projects' admin accounts be made?") },
+        .email => .{ translated("One account for all projects"), translated("Every project you make gets an account with this email and opens with you signed in.") },
+        .tools => .{ translated("Connect your AI tool"), translated("Publr works inside the AI tool you use. Connect it once, for every project.") },
     };
     const y = top(s) + mark_step;
     try u.text(.{
@@ -379,21 +387,21 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme, window: *native.Window) !void 
     switch (s.step) {
         .start => {
             try drawPanel(u, s, t);
-            try secondary(u, t, localRect(s), "Use without Cloud", s.hover == .local);
+            try secondary(u, t, localRect(s), translated("Use without Cloud"), s.hover == .local);
         },
         .without_cloud => {
-            for (ways) |way| try drawTile(u, s, t, way);
-            try secondary(u, t, backRect(s), "Back", s.hover == .back);
-            try primary(u, t, confirmRect(s), "Next", s.hover == .confirm, ready(s));
+            for (ways()) |way| try drawTile(u, s, t, way);
+            try secondary(u, t, backRect(s), translated("Back"), s.hover == .back);
+            try primary(u, t, confirmRect(s), translated("Next"), s.hover == .confirm, ready(s));
         },
         .email => {
             try drawEmail(u, s, t, window);
-            try secondary(u, t, backRect(s), "Back", s.hover == .back);
-            try primary(u, t, confirmRect(s), "Continue", s.hover == .confirm, ready(s));
+            try secondary(u, t, backRect(s), translated("Back"), s.hover == .back);
+            try primary(u, t, confirmRect(s), translated("Continue"), s.hover == .confirm, ready(s));
         },
         .tools => {
             try drawTools(u, s, t);
-            try primary(u, t, continueRect(s), "Continue", s.hover == .confirm, true);
+            try primary(u, t, continueRect(s), translated("Continue"), s.hover == .confirm, true);
         },
     }
 
@@ -527,10 +535,12 @@ fn drawTools(u: *ui.Ui, s: State, t: *const Theme) !void {
             .w = r.w - 2,
             .h = 1,
         }, t.border, 0);
+        // The words stop short of the button, however long it says.
+        const room: f32 = if (toolButton(s, u, i)) |b| r.x + r.w - b.x + 32 else 80;
         try u.text(.{
             .x = r.x + 20,
             .y = r.y + 15,
-            .w = r.w - 200,
+            .w = r.w - room,
             .h = 20,
         }, tool.tool.name(), .{
             .size = 15,
@@ -540,7 +550,7 @@ fn drawTools(u: *ui.Ui, s: State, t: *const Theme) !void {
         try u.text(.{
             .x = r.x + 20,
             .y = r.y + 37,
-            .w = r.w - 200,
+            .w = r.w - room,
             .h = 18,
         }, tool.line, .{
             .size = 13,
@@ -566,7 +576,7 @@ fn drawEmail(u: *ui.Ui, s: State, t: *const Theme, window: *native.Window) !void
         .y = f.y - 22,
         .w = f.w,
         .h = 16,
-    }, if (s.problem) |p| p else "Email", .{
+    }, if (s.problem) |p| p else translated("Email"), .{
         .size = 13,
         .weight = 500,
         .color = if (s.problem != null) t.danger else t.text,
@@ -611,7 +621,7 @@ fn drawPanel(u: *ui.Ui, s: State, t: *const Theme) !void {
         .weight = 600,
         .color = t.text,
     });
-    const pill = "Recommended";
+    const pill = translated("Recommended");
     const pill_width = u.measure(pill, .{
         .size = 11,
         .weight = 500,
@@ -636,14 +646,14 @@ fn drawPanel(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = y,
         .w = inner,
         .h = 40,
-    }, "For the best experience, we recommend Publr Cloud. It's free forever, and no credit card is needed.", .{
+    }, translated("For the best experience, we recommend Publr Cloud. It's free forever, and no credit card is needed."), .{
         .size = 14,
         .color = t.text2,
         .truncate = false,
     });
 
     y += 40 + 20;
-    for (benefits) |b| {
+    for (benefits()) |b| {
         try drawBenefit(u, t, b, x, y, inner);
         y += benefit_step;
     }
@@ -658,7 +668,7 @@ fn drawPanel(u: *ui.Ui, s: State, t: *const Theme) !void {
         .color = t.danger,
     });
 
-    const label = if (s.signing_in) "Waiting for your browser…" else "Continue with Publr Cloud";
+    const label = if (s.signing_in) translated("Waiting for your browser…") else translated("Continue with Publr Cloud");
     try primary(u, t, cloudRect(s), label, s.hover == .cloud, !s.signing_in);
 }
 

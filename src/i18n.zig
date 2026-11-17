@@ -37,20 +37,16 @@ const files = [_]struct {
     },
 };
 
-var arena_state: std.heap.ArenaAllocator = undefined;
-var ready = false;
-var current: ?catalog_module.Catalog = null;
+/// Each language's catalogue, read the first time it is spoken and kept: words already
+/// handed out (a stored problem, a status) stay valid when the language changes.
+var loaded: [files.len]?catalog_module.Catalog = @splat(null);
+var current: ?*const catalog_module.Catalog = null;
 /// The language spoken now (`en`, `pl`).
 var spoken: []const u8 = "en";
 
 /// Speaks `choice`: the Mac's language when it is `system`, English when Desktop has none of
 /// it.
 pub fn use(choice: Choice) void {
-    if (!ready) {
-        arena_state = .init(std.heap.page_allocator);
-        ready = true;
-    }
-    _ = arena_state.reset(.retain_capacity);
     current = null;
     spoken = "en";
     var buf: [64]u8 = undefined;
@@ -59,16 +55,19 @@ pub fn use(choice: Choice) void {
         .en => "en",
         .pl => "pl",
     };
-    for (files) |f| if (std.mem.eql(u8, f.code, code)) {
-        const sources = [_]catalog_module.Source{.{
-            .provider = "desktop",
-            .first_party = true,
-            .po = f.po,
-        }};
-        current = catalog_module.Catalog.init(arena_state.allocator(), f.code, &sources, &.{}) catch |e| {
-            std.debug.print("desktop: the {s} translation: {t}\n", .{ f.code, e });
-            return;
-        };
+    inline for (files, 0..) |f, i| if (std.mem.eql(u8, f.code, code)) {
+        if (loaded[i] == null) {
+            const sources = [_]catalog_module.Source{.{
+                .provider = "desktop",
+                .first_party = true,
+                .po = f.po,
+            }};
+            loaded[i] = catalog_module.Catalog.init(std.heap.page_allocator, f.code, &sources, &.{}) catch |e| {
+                std.debug.print("desktop: the {s} translation: {t}\n", .{ f.code, e });
+                return;
+            };
+        }
+        current = &loaded[i].?;
         spoken = f.code;
     };
 }

@@ -5,6 +5,8 @@
 
 const std = @import("std");
 const native = @import("native");
+const i18n = @import("i18n.zig");
+const translated = i18n.translated;
 
 pub const Stage = enum(u8) {
     packing,
@@ -59,8 +61,8 @@ pub const Job = struct {
     fn run(self: *Job) void {
         self.steps() catch |e| {
             if (self.problem == null) self.problem = switch (e) {
-                error.OutOfMemory => "Desktop ran out of memory.",
-                else => "Publr Cloud could not be reached.",
+                error.OutOfMemory => translated("Desktop ran out of memory."),
+                else => translated("Publr Cloud could not be reached."),
             };
         };
         self.progress.stage.store(@backingInt(if (self.problem == null) Stage.done else Stage.failed), .release);
@@ -153,32 +155,40 @@ pub const Job = struct {
         if (said.len > 0) std.debug.print("desktop: publr deploy: {s}\n", .{said});
         if (failed) |f| {
             const known = problemFor(f.@"error");
-            self.problem = if (known.len > 0) known else if (f.message.len > 0) f.message else "Publr Cloud did not make the project.";
+            self.problem = if (known.len > 0) known else if (f.message.len > 0) f.message else translated("Publr Cloud did not make the project.");
             return;
         }
         // The command's first line says why; its last only names the error.
         var lines = std.mem.tokenizeScalar(u8, said, '\n');
         const first = std.mem.trim(u8, lines.next() orelse "", " \r\t");
-        self.problem = if (first.len > 0) first else "The site could not be deployed.";
+        self.problem = if (first.len > 0) first else translated("The site could not be deployed.");
     }
 };
 
+/// Cloud's reason in Desktop's words, in the language spoken now; empty for one it does not
+/// name.
 fn problemFor(code: []const u8) []const u8 {
-    const table = [_]struct {
-        []const u8,
-        []const u8,
-    }{
-        .{ "Conflict", "That address was just taken. Pick another." },
-        .{ "Invalid", "That address cannot be used. Pick another." },
-        .{ "NotFound", "That space is not yours any more." },
-        .{ "NoUpload", "The upload was lost. Try again." },
-        .{ "NotASite", "Publr Cloud could not read the packed site." },
-        .{ "NewerSite", "This site was made by a newer Publr than Publr Cloud runs." },
-        .{ "Unverified", "Verify your email address first (Publr Cloud sent you a link)." },
-        .{ "Unavailable", "Publr Cloud cannot start sites right now. Try again in a moment." },
+    const Code = enum {
+        Conflict,
+        Invalid,
+        NotFound,
+        NoUpload,
+        NotASite,
+        NewerSite,
+        Unverified,
+        Unavailable,
     };
-    for (table) |t| if (std.mem.eql(u8, code, t[0])) return t[1];
-    return "";
+    const known = std.meta.stringToEnum(Code, code) orelse return "";
+    return switch (known) {
+        .Conflict => translated("That address was just taken. Pick another."),
+        .Invalid => translated("That address cannot be used. Pick another."),
+        .NotFound => translated("That space is not yours any more."),
+        .NoUpload => translated("The upload was lost. Try again."),
+        .NotASite => translated("Publr Cloud could not read the packed site."),
+        .NewerSite => translated("This site was made by a newer Publr than Publr Cloud runs."),
+        .Unverified => translated("Verify your email address first (Publr Cloud sent you a link)."),
+        .Unavailable => translated("Publr Cloud cannot start sites right now. Try again in a moment."),
+    };
 }
 
 /// The deploy link a folder carries (`cloud.json`), if it was deployed.

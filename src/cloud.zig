@@ -6,6 +6,8 @@
 
 const std = @import("std");
 const native = @import("native");
+const i18n = @import("i18n.zig");
+const translated = i18n.translated;
 
 // The first-party client id Publr Cloud signs this app in as.
 const client_id = "publr-studio";
@@ -274,7 +276,7 @@ const Create = struct {
         const a = self.arena.?.allocator();
         self.made = .{
             .name = self.name,
-            .problem = "Publr Cloud could not be reached.",
+            .problem = translated("Publr Cloud could not be reached."),
         };
         const sent = std.json.Stringify.valueAlloc(a, .{
             .space = self.space,
@@ -297,7 +299,7 @@ const Create = struct {
                 self.made.problem = null;
                 self.made.address = std.fmt.allocPrint(a, "{s}://{s}.{s}", .{ scheme, answer.slug, self.domain }) catch "";
             } else {
-                self.made.problem = answer.message orelse "Publr Cloud did not make the project.";
+                self.made.problem = answer.message orelse translated("Publr Cloud did not make the project.");
             }
         } else |_| {}
         native.runOnMain(self, finish);
@@ -342,7 +344,7 @@ const SignOn = struct {
         const a = self.arena.?.allocator();
         self.signed = .{
             .slug = self.slug,
-            .problem = "Publr Cloud could not be reached.",
+            .problem = translated("Publr Cloud could not be reached."),
         };
         const sent = std.json.Stringify.valueAlloc(a, .{
             .project = self.slug,
@@ -372,7 +374,7 @@ const SignOn = struct {
                     answer.token,
                 }, 0) catch "";
             } else {
-                self.signed.problem = answer.message orelse "Publr Cloud did not sign you in to the project.";
+                self.signed.problem = answer.message orelse translated("Publr Cloud did not sign you in to the project.");
             }
         } else |_| {}
         native.runOnMain(self, finish);
@@ -411,7 +413,7 @@ const Job = struct {
         const reply = request(self.cloud.io, a, self.cloud.base, .GET, "/api/cloud.spaces", .{
             .token = self.token.?,
         }) catch {
-            self.problem = "Publr Cloud could not be reached.";
+            self.problem = translated("Publr Cloud could not be reached.");
             arena.deinit();
             return;
         };
@@ -421,7 +423,7 @@ const Job = struct {
             return;
         }
         if (reply.status != .ok) {
-            self.problem = "Publr Cloud did not list your sites.";
+            self.problem = translated("Publr Cloud did not list your sites.");
             arena.deinit();
             return;
         }
@@ -429,7 +431,7 @@ const Job = struct {
             .ignore_unknown_fields = true,
             .allocate = .alloc_always,
         }) catch {
-            self.problem = "Publr Cloud answered something Desktop does not understand.";
+            self.problem = translated("Publr Cloud answered something Desktop does not understand.");
             arena.deinit();
             return;
         };
@@ -439,9 +441,9 @@ const Job = struct {
     fn signIn(self: *Job) void {
         self.token = authorize(self.cloud) catch |e| blk: {
             self.problem = switch (e) {
-                error.Denied => "Sign-in was denied. Try again, or use Publr without Cloud.",
-                error.TimedOut => "Sign-in took too long. Try again.",
-                else => "Signing in to Publr Cloud did not work.",
+                error.Denied => translated("Sign-in was denied. Try again, or use Publr without Cloud."),
+                error.TimedOut => translated("Sign-in took too long. Try again."),
+                else => translated("Signing in to Publr Cloud did not work."),
             };
             break :blk null;
         };
@@ -554,7 +556,7 @@ fn authorize(c: *Cloud) ![]u8 {
 }
 
 const back_page =
-    \\<!doctype html><meta charset=utf-8><title>Publr Desktop</title>
+    \\<!doctype html><html lang={s}><meta charset=utf-8><title>Publr Desktop</title>
     \\<body style="margin:0;height:100vh;display:grid;place-items:center;font:15px -apple-system,system-ui,sans-serif;color:#222">
     \\<div style="text-align:center"><p style="font-size:18px;font-weight:600;margin:0 0 8px">{s}</p><p style="margin:0;color:#777">{s}</p></div>
 ;
@@ -592,9 +594,9 @@ fn waitForCode(io: std.Io, a: std.mem.Allocator, listener: *std.Io.net.Server, s
         }
         const ok = code != null and std.mem.eql(u8, got_state, state);
         const body = try std.fmt.allocPrint(a, back_page, if (ok)
-            .{ "Signed in to Publr Desktop", "You can close this tab and go back to Desktop." }
+            .{ i18n.language(), translated("Signed in to Publr Desktop"), translated("You can close this tab and go back to Desktop.") }
         else
-            .{ "Sign-in denied", "Publr Desktop is still signed out. You can close this tab." });
+            .{ i18n.language(), translated("Sign-in denied"), translated("Publr Desktop is still signed out. You can close this tab.") });
         try writer.interface.print("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}", .{ body.len, body });
         try writer.interface.flush();
         if (denied or !ok) return error.Denied;

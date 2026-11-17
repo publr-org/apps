@@ -11,6 +11,8 @@ const ui = @import("ui");
 const icons = @import("publr_icons");
 const home = @import("home.zig");
 const Theme = @import("theme.zig").Theme;
+const i18n = @import("i18n.zig");
+const translated = i18n.translated;
 const centred = @import("bar.zig").centred;
 
 pub const sidebar_width: f32 = 272;
@@ -69,13 +71,13 @@ pub const Rare = enum {
 
     fn label(r: Rare) []const u8 {
         return switch (r) {
-            .clone => "Clone to this Mac",
-            .local_copy => "Open copy on this Mac",
-            .finder => "Show in Finder",
-            .copy_path => "Copy path",
-            .deploy => "Deploy to Cloud\u{2026}",
-            .dashboard => "Open in Cloud dashboard",
-            .remove => "Remove from this Mac",
+            .clone => translated("Clone to this Mac"),
+            .local_copy => translated("Open copy on this Mac"),
+            .finder => translated("Show in Finder"),
+            .copy_path => translated("Copy path"),
+            .deploy => translated("Deploy to Cloud\u{2026}"),
+            .dashboard => translated("Open in Cloud dashboard"),
+            .remove => translated("Remove from this Mac"),
         };
     }
 
@@ -240,7 +242,7 @@ fn moreRect(s: State) ui.Rect {
 }
 
 fn adminRect(s: State, u: *ui.Ui) ui.Rect {
-    const w = u.measure("Open admin", button_text) + 36;
+    const w = u.measure(translated("Open admin"), button_text) + 36;
     const more = moreRect(s);
     return .{
         .x = more.x - 8 - w,
@@ -251,7 +253,7 @@ fn adminRect(s: State, u: *ui.Ui) ui.Rect {
 }
 
 fn siteLabel(s: State) []const u8 {
-    return if (s.kind == .local) "View site" else "View live site";
+    return if (s.kind == .local) translated("View site") else translated("View live site");
 }
 
 fn siteRect(s: State, u: *ui.Ui) ui.Rect {
@@ -266,14 +268,16 @@ fn siteRect(s: State, u: *ui.Ui) ui.Rect {
 }
 
 fn cloneLabel(s: State) []const u8 {
-    return if (s.cloning) "Cloning\u{2026}" else "Clone to this Mac";
+    return if (s.cloning) translated("Cloning\u{2026}") else translated("Clone to this Mac");
 }
 
-const browser_label = "Open in browser";
+fn browserLabel() []const u8 {
+    return translated("Open in browser");
+}
 
 /// Open in browser, its icon before its label.
 fn browserRect(s: State, u: *ui.Ui) ui.Rect {
-    const w = u.measure(browser_label, button_text) + 32 + 22;
+    const w = u.measure(browserLabel(), button_text) + 32 + 22;
     const site = siteRect(s, u);
     return .{
         .x = site.x - 8 - w,
@@ -377,25 +381,25 @@ const Detail = struct {
 fn details(s: State, out: *[5]Detail) []const Detail {
     var n: usize = 0;
     out[n] = .{
-        .label = "Name",
+        .label = translated("Name"),
         .value = s.name,
     };
     n += 1;
     out[n] = .{
-        .label = if (s.kind == .local) "Address" else "Live address",
+        .label = if (s.kind == .local) translated("Address") else translated("Live address"),
         .value = hostOf(s.address),
     };
     n += 1;
     if (s.kind != .local) {
         out[n] = .{
-            .label = "Cloud space",
+            .label = translated("Cloud space"),
             .value = if (s.space.len > 0) s.space else "\u{2014}",
         };
         n += 1;
     }
     if (s.folder.len > 0) {
         out[n] = .{
-            .label = "On this Mac",
+            .label = translated("On this Mac"),
             .value = s.folder,
         };
         n += 1;
@@ -403,13 +407,18 @@ fn details(s: State, out: *[5]Detail) []const Detail {
     return out[0..n];
 }
 
-const copy_label = "Copy path";
-const copied_label = "Copied";
+fn copyLabel() []const u8 {
+    return translated("Copy path");
+}
+
+fn copiedLabel() []const u8 {
+    return translated("Copied");
+}
 
 /// Copy path, left of Show in Finder.
 fn copyRect(s: State, u: *ui.Ui, list: []const Detail) ui.Rect {
     const f = finderRect(s, u, list);
-    const w = u.measure(copy_label, button_text) + 4;
+    const w = u.measure(copyLabel(), button_text) + 4;
     return .{
         .x = f.x - 20 - w,
         .y = f.y,
@@ -420,7 +429,7 @@ fn copyRect(s: State, u: *ui.Ui, list: []const Detail) ui.Rect {
 
 fn finderRect(s: State, u: *ui.Ui, list: []const Detail) ui.Rect {
     const r = detailRow(s, list.len - 1);
-    const w = u.measure("Show in Finder", button_text) + 4;
+    const w = u.measure(translated("Show in Finder"), button_text) + 4;
     return .{
         .x = r.x + r.w - w,
         .y = r.y,
@@ -471,13 +480,15 @@ fn buttonsTop(s: State) f32 {
     return advancedTop(s) + 30;
 }
 
-const choose_build_label = "Choose build…";
+fn chooseBuildLabel() []const u8 {
+    return translated("Choose build…");
+}
 
 fn chooseBuildRect(s: State, u: *ui.Ui) ui.Rect {
     return .{
         .x = contentX(s),
         .y = buttonsTop(s),
-        .w = u.measure(choose_build_label, button_text) + 32,
+        .w = u.measure(chooseBuildLabel(), button_text) + 32,
         .h = 32,
     };
 }
@@ -493,8 +504,8 @@ fn usePinRect(s: State, u: *ui.Ui, label: []const u8) ui.Rect {
 }
 
 fn usePinLabel(s: State, buf: []u8) []const u8 {
-    if (s.pin.len == 0) return "Use pinned version";
-    return std.fmt.bufPrint(buf, "Use Publr {s}", .{s.pin}) catch "Use pinned version";
+    if (s.pin.len == 0) return translated("Use pinned version");
+    return i18n.fill(buf, translated("Use Publr {version}"), .{ .version = s.pin });
 }
 
 /// Where Overview's last line ends: the details' foot, or the open fold's buttons.
@@ -647,7 +658,7 @@ fn addressBar(s: State) ui.Rect {
 
 fn barBrowserRect(s: State, u: *ui.Ui) ui.Rect {
     const bar = addressBar(s);
-    const w = u.measure(browser_label, button_text) + 36 + 16;
+    const w = u.measure(browserLabel(), button_text) + 36 + 16;
     return .{
         .x = bar.x + bar.w - 8 - w,
         .y = bar.y + (bar.h - 30) / 2,
@@ -666,7 +677,7 @@ fn drawAddressBar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .w = bar.w,
         .h = 1,
     }, t.border, 0);
-    const where = if (s.kind == .local) "On this Mac" else "On Cloud";
+    const where = if (s.kind == .local) translated("On this Mac") else translated("On Cloud");
     const pill_style: ui.TextStyle = .{
         .size = 12,
         .weight = 500,
@@ -714,7 +725,7 @@ fn drawAddressBar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .size = 13,
         .color = t.text2,
     });
-    try withIcon(u, t, button, icons.external, browser_label, same(s.hover, .open_browser));
+    try withIcon(u, t, button, icons.external, browserLabel(), same(s.hover, .open_browser));
 }
 
 // The sidebar.
@@ -775,7 +786,7 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = admin.y,
         .w = admin.w - 46,
         .h = admin.h,
-    }, "Admin", .{
+    }, translated("Admin"), .{
         .size = 13,
         .weight = 500,
         .color = if (on) t.text else t.text2,
@@ -822,7 +833,7 @@ fn sideCard(u: *ui.Ui, s: State, t: *const Theme, k: usize) !void {
     } else {
         try picture(u, t, thumb, thumbOf(s, k - 1), 6, false);
     }
-    const label = if (k == 0) "Overview" else s.apps[k - 1].label;
+    const label = if (k == 0) translated("Overview") else s.apps[k - 1].label;
     try u.text(.{
         .x = r.x + 12,
         .y = r.y + r.h - side_label,
@@ -962,13 +973,13 @@ fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
     }, t.text2, 0);
 
     if (s.kind == .cloud) try secondary(u, t, site, cloneLabel(s), same(s.hover, .clone));
-    try withIcon(u, t, browserRect(s, u), icons.external, browser_label, same(s.hover, .open_browser));
+    try withIcon(u, t, browserRect(s, u), icons.external, browserLabel(), same(s.hover, .open_browser));
     try secondary(u, t, siteRect(s, u), siteLabel(s), same(s.hover, .site));
     const admin = adminRect(s, u);
     var fill = t.primary;
     if (same(s.hover, .admin)) fill.a = 0.86;
     try u.rect(admin, fill, 8);
-    try u.text(admin, "Open admin", .{
+    try u.text(admin, translated("Open admin"), .{
         .size = button_text.size,
         .weight = button_text.weight,
         .color = t.on_primary,
@@ -999,8 +1010,8 @@ fn secondary(u: *ui.Ui, t: *const Theme, r: ui.Rect, label: []const u8, hovered:
 
 fn calloutLabel(c: Callout) []const u8 {
     return switch (c) {
-        .unsent => "Send to Cloud",
-        .waiting => "Open review",
+        .unsent => translated("Send to Cloud"),
+        .waiting => translated("Open review"),
         .failed, .none => "",
     };
 }
@@ -1041,9 +1052,9 @@ fn drawCallout(u: *ui.Ui, s: State, t: *const Theme) !void {
     });
     try u.icon(centred(icon_box, 16), glyph, if (s.callout == .failed) t.danger else t.text);
     const title = switch (s.callout) {
-        .unsent => "Changes not on Cloud",
-        .waiting => "Waiting for review",
-        .failed, .none => if (s.failed_why.len > 0) s.failed_why else "Can\u{2019}t reach Cloud",
+        .unsent => translated("Changes not on Cloud"),
+        .waiting => translated("Waiting for review"),
+        .failed, .none => if (s.failed_why.len > 0) s.failed_why else translated("Can\u{2019}t reach Cloud"),
     };
     const text_x = icon_box.x + icon_box.w + 14;
     const text_w = (if (s.callout == .failed) r.x + r.w else calloutButton(s, u).x) - text_x - 16;
@@ -1104,7 +1115,7 @@ fn sectionHead(u: *ui.Ui, s: State, t: *const Theme, y: f32, title: []const u8, 
 fn drawApps(u: *ui.Ui, s: State, t: *const Theme) !void {
     // A remote project's count shows once its apps are known; none known says nothing.
     const known = s.folder.len > 0 or s.apps.len > 0;
-    try sectionHead(u, s, t, appsTop(s), "Apps", if (known and !s.apps_loading) s.apps.len else null);
+    try sectionHead(u, s, t, appsTop(s), translated("Apps"), if (known and !s.apps_loading) s.apps.len else null);
     if (s.apps_loading) {
         for (0..loading_cards) |k| try loadingCard(u, s, t, k);
         return;
@@ -1115,7 +1126,7 @@ fn drawApps(u: *ui.Ui, s: State, t: *const Theme) !void {
             .y = appsTop(s) + 56,
             .w = contentWidth(s),
             .h = 20,
-        }, "No apps yet.", .{
+        }, translated("No apps yet."), .{
             .size = 13,
             .color = t.text2,
         });
@@ -1189,7 +1200,7 @@ fn appCard(u: *ui.Ui, s: State, t: *const Theme, app: App, k: usize) !void {
         .y = r.y + thumb_h + 42,
         .w = r.w - 36,
         .h = 18,
-    }, "Open app", .{
+    }, translated("Open app"), .{
         .size = 12,
         .color = if (hovered) t.text else t.text2,
     });
@@ -1236,9 +1247,10 @@ fn appCard(u: *ui.Ui, s: State, t: *const Theme, app: App, k: usize) !void {
 }
 
 fn drawDetails(u: *ui.Ui, s: State, t: *const Theme) !void {
-    try sectionHead(u, s, t, detailsTop(s), "Project details", null);
+    try sectionHead(u, s, t, detailsTop(s), translated("Project details"), null);
     var list: [5]Detail = undefined;
     const shown = details(s, &list);
+    const buttons_room = @max(240, u.measure(copyLabel(), button_text) + u.measure(translated("Show in Finder"), button_text) + 48);
     for (shown, 0..) |d, k| {
         const r = detailRow(s, k);
         try u.rect(.{
@@ -1260,7 +1272,7 @@ fn drawDetails(u: *ui.Ui, s: State, t: *const Theme) !void {
             .x = r.x + 220,
             .y = r.y,
             // Room for the row's text buttons: Copy path, Show in Finder.
-            .w = r.w - 220 - 240,
+            .w = r.w - 220 - buttons_room,
             .h = r.h,
         }, d.value, .{
             .size = 13,
@@ -1269,13 +1281,13 @@ fn drawDetails(u: *ui.Ui, s: State, t: *const Theme) !void {
     }
     if (s.folder.len == 0) return;
     const f = finderRect(s, u, shown);
-    try u.text(f, "Show in Finder", .{
+    try u.text(f, translated("Show in Finder"), .{
         .size = button_text.size,
         .weight = button_text.weight,
         .color = if (same(s.hover, .finder)) t.text else t.text2,
         .@"align" = .right,
     });
-    try u.text(copyRect(s, u, shown), if (s.copied) copied_label else copy_label, .{
+    try u.text(copyRect(s, u, shown), if (s.copied) copiedLabel() else copyLabel(), .{
         .size = button_text.size,
         .weight = button_text.weight,
         .color = if (s.copied) t.running else if (same(s.hover, .copy_path)) t.text else t.text2,
@@ -1300,7 +1312,7 @@ fn drawAdvanced(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = a.y,
         .w = a.w - 40,
         .h = a.h,
-    }, "Advanced", .{
+    }, translated("Advanced"), .{
         .size = 13,
         .weight = 600,
         .color = t.text,
@@ -1318,7 +1330,7 @@ fn drawAdvanced(u: *ui.Ui, s: State, t: *const Theme) !void {
     var vb: [64]u8 = undefined;
     const build = if (s.own_build.len > 0) s.own_build else s.shared_build;
     if (build.len > 0) {
-        try u.text(line, if (s.own_build.len > 0) "Build:" else "Build (all projects):", .{
+        try u.text(line, if (s.own_build.len > 0) translated("Build:") else translated("Build (all projects):"), .{
             .size = 13,
             .color = t.text,
         });
@@ -1343,7 +1355,7 @@ fn drawAdvanced(u: *ui.Ui, s: State, t: *const Theme) !void {
             .color = t.text,
         });
     }
-    try outlined(u, t, chooseBuildRect(s, u), choose_build_label, same(s.hover, .choose_build));
+    try outlined(u, t, chooseBuildRect(s, u), chooseBuildLabel(), same(s.hover, .choose_build));
     if (s.own_build.len > 0) {
         var pb: [64]u8 = undefined;
         const label = usePinLabel(s, &pb);

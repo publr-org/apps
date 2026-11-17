@@ -10,6 +10,8 @@ const ui = @import("ui");
 const icons = @import("publr_icons");
 const Theme = @import("theme.zig").Theme;
 const ai_tools = @import("ai_tools.zig");
+const i18n = @import("i18n.zig");
+const translated = i18n.translated;
 
 const header_height: f32 = 48;
 const head_height: f32 = 100;
@@ -50,6 +52,8 @@ pub const State = struct {
     tools: []const ai_tools.Row,
     /// Advanced is unfolded.
     advanced: bool,
+    /// How far the page is scrolled, under its bar.
+    scroll: f32 = 0,
     /// Said in place of the buttons' note while something runs ("Choosing a folder…"), or
     /// what went wrong.
     busy: ?[]const u8 = null,
@@ -81,7 +85,7 @@ fn column(s: State) ui.Rect {
     const x = s.left + pad;
     return .{
         .x = x,
-        .y = s.top + header_height + head_height,
+        .y = s.top + header_height + head_height - s.scroll,
         .w = @min(column_max, s.width - x - pad),
         .h = 0,
     };
@@ -106,7 +110,7 @@ fn otherRow(s: State, i: usize) ui.Rect {
 
 fn addRect(s: State, u: *ui.Ui) ui.Rect {
     const rows: f32 = @floatFromInt(@max(s.folders.len, 1));
-    return buttonAt(u, column(s).x, otherRow(s, 0).y + rows * row_height + 8, add_label);
+    return buttonAt(u, column(s).x, otherRow(s, 0).y + rows * row_height + 8, addLabel());
 }
 
 fn newSitesTitle(s: State, u: *ui.Ui) f32 {
@@ -119,7 +123,7 @@ fn adminRow(s: State, u: *ui.Ui) ui.Rect {
 }
 
 fn adminChangeRect(s: State, u: *ui.Ui) ui.Rect {
-    return rowButton(u, adminRow(s, u), change_label);
+    return rowButton(u, adminRow(s, u), changeLabel());
 }
 
 fn languageTitle(s: State, u: *ui.Ui) f32 {
@@ -198,12 +202,12 @@ fn hintTop(s: State, u: *ui.Ui) f32 {
 }
 
 fn chooseRect(s: State, u: *ui.Ui) ui.Rect {
-    return buttonAt(u, column(s).x, hintTop(s, u) + hint_height + 8, choose_label);
+    return buttonAt(u, column(s).x, hintTop(s, u) + hint_height + 8, chooseLabel());
 }
 
 fn clearRect(s: State, u: *ui.Ui) ui.Rect {
     const choose = chooseRect(s, u);
-    return buttonAt(u, choose.x + choose.w + 8, choose.y, clear_label);
+    return buttonAt(u, choose.x + choose.w + 8, choose.y, clearLabel());
 }
 
 fn row(s: State, top: f32, i: usize) ui.Rect {
@@ -236,18 +240,34 @@ fn buttonAt(u: *ui.Ui, x: f32, y: f32, label: []const u8) ui.Rect {
     };
 }
 
-const change_label = "Change…";
-const remove_label = "Remove";
-const add_label = "Add folder…";
-const choose_label = "Choose build…";
-const clear_label = "Back to default";
+// The buttons' words, in the language spoken now: each measured and drawn the same.
+
+fn changeLabel() []const u8 {
+    return translated("Change…");
+}
+
+fn removeLabel() []const u8 {
+    return translated("Remove");
+}
+
+fn addLabel() []const u8 {
+    return translated("Add folder…");
+}
+
+fn chooseLabel() []const u8 {
+    return translated("Choose build…");
+}
+
+fn clearLabel() []const u8 {
+    return translated("Back to default");
+}
 
 fn changeRect(s: State, u: *ui.Ui) ui.Rect {
-    return rowButton(u, defaultRow(s), change_label);
+    return rowButton(u, defaultRow(s), changeLabel());
 }
 
 fn removeRect(s: State, u: *ui.Ui, i: usize) ui.Rect {
-    return rowButton(u, otherRow(s, i), remove_label);
+    return rowButton(u, otherRow(s, i), removeLabel());
 }
 
 // Hit testing.
@@ -258,8 +278,8 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     for (0..s.folders.len) |i| if (removeRect(s, u, i).contains(x, y)) return .{ .remove_folder = i };
     if (addRect(s, u).contains(x, y)) return .add_folder;
     if (adminChangeRect(s, u).contains(x, y)) return .change_admin;
-    if (rowButton(u, appLanguageRow(s, u), change_label).contains(x, y)) return .change_app_language;
-    if (rowButton(u, projectLanguageRow(s, u), change_label).contains(x, y)) return .change_project_language;
+    if (rowButton(u, appLanguageRow(s, u), changeLabel()).contains(x, y)) return .change_app_language;
+    if (rowButton(u, projectLanguageRow(s, u), changeLabel()).contains(x, y)) return .change_project_language;
     for (s.tools, 0..) |tool, i| if (toolButton(s, u, i)) |b| if (b.contains(x, y)) return .{ .connect_tool = tool.tool };
     if (advancedRect(s, u).contains(x, y)) return .advanced;
     if (!s.advanced) return .none;
@@ -270,15 +290,34 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
 
 // Drawing.
 
+/// How far the page scrolls: its last part (Advanced, or what it unfolds) in view.
+pub fn maxScroll(s: State, u: *ui.Ui) f32 {
+    var top = s;
+    top.scroll = 0;
+    const bottom = if (top.advanced) chooseRect(top, u).y + button_height else advancedRect(top, u).y + 32;
+    return @max(0, bottom + pad - top.height);
+}
+
 pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
+    try u.beginClip(.{
+        .x = s.left,
+        .y = s.top + header_height,
+        .w = s.width - s.left,
+        .h = s.height - s.top - header_height,
+    });
+    try drawPage(u, s, t);
+    try u.endClip();
     try drawHeader(u, s, t);
+}
+
+fn drawPage(u: *ui.Ui, s: State, t: *const Theme) !void {
     const c = column(s);
     try u.text(.{
         .x = c.x,
-        .y = s.top + header_height + 24,
+        .y = s.top + header_height + 24 - s.scroll,
         .w = c.w,
         .h = 34,
-    }, "Settings", .{
+    }, translated("Settings"), .{
         .size = 28,
         .weight = 600,
         .color = t.text,
@@ -286,56 +325,56 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
     });
     try u.text(.{
         .x = c.x,
-        .y = s.top + header_height + 60,
+        .y = s.top + header_height + 60 - s.scroll,
         .w = c.w,
         .h = 20,
-    }, s.problem orelse s.busy orelse "Where projects live on this Mac, and who new projects belong to.", .{
+    }, s.problem orelse s.busy orelse translated("Where projects live on this Mac, and who new projects belong to."), .{
         .size = 14,
         .color = if (s.problem != null) t.danger else t.text2,
     });
 
     // Folders.
-    try sectionTitle(u, t, c, foldersTitle(s), "Folders");
-    try smallLabel(u, t, c, defaultRow(s).y - 18, "Default projects folder");
-    try pathRow(u, t, defaultRow(s), s.folder);
-    try button(u, t, changeRect(s, u), change_label, same(s.hover, .change_folder), true);
-    try smallLabel(u, t, c, othersLabel(s), "Other locations");
+    try sectionTitle(u, t, c, foldersTitle(s), translated("Folders"));
+    try smallLabel(u, t, c, defaultRow(s).y - 18, translated("Default projects folder"));
+    try pathRow(u, t, defaultRow(s), s.folder, changeLabel());
+    try button(u, t, changeRect(s, u), changeLabel(), same(s.hover, .change_folder), true);
+    try smallLabel(u, t, c, othersLabel(s), translated("Other locations"));
     if (s.folders.len == 0) {
-        try u.text(otherRow(s, 0), "No other folders.", .{
+        try u.text(otherRow(s, 0), translated("No other folders."), .{
             .size = 13,
             .color = t.text3,
         });
     }
     for (s.folders, 0..) |f, i| {
-        try pathRow(u, t, otherRow(s, i), f);
-        try button(u, t, removeRect(s, u, i), remove_label, same(s.hover, .{ .remove_folder = i }), true);
+        try pathRow(u, t, otherRow(s, i), f, removeLabel());
+        try button(u, t, removeRect(s, u, i), removeLabel(), same(s.hover, .{ .remove_folder = i }), true);
     }
-    try button(u, t, addRect(s, u), add_label, same(s.hover, .add_folder), true);
+    try button(u, t, addRect(s, u), addLabel(), same(s.hover, .add_folder), true);
 
     // New sites.
-    try sectionTitle(u, t, c, newSitesTitle(s, u), "Default account email");
-    try pathRow(u, t, adminRow(s, u), s.admin);
-    try button(u, t, adminChangeRect(s, u), change_label, same(s.hover, .change_admin), true);
+    try sectionTitle(u, t, c, newSitesTitle(s, u), translated("Default account email"));
+    try pathRow(u, t, adminRow(s, u), s.admin, changeLabel());
+    try button(u, t, adminChangeRect(s, u), changeLabel(), same(s.hover, .change_admin), true);
 
     // Language.
-    try sectionTitle(u, t, c, languageTitle(s, u), "Language");
+    try sectionTitle(u, t, c, languageTitle(s, u), translated("Language"));
     const app_row = appLanguageRow(s, u);
     try smallLabel(u, t, c, app_row.y - 18, "Publr Desktop");
-    try pathRow(u, t, app_row, s.app_language);
-    try button(u, t, rowButton(u, app_row, change_label), change_label, same(s.hover, .change_app_language), true);
+    try pathRow(u, t, app_row, s.app_language, changeLabel());
+    try button(u, t, rowButton(u, app_row, changeLabel()), changeLabel(), same(s.hover, .change_app_language), true);
     const projects_row = projectLanguageRow(s, u);
-    try smallLabel(u, t, c, projects_row.y - 18, "New projects");
-    try pathRow(u, t, projects_row, s.project_language);
-    try button(u, t, rowButton(u, projects_row, change_label), change_label, same(s.hover, .change_project_language), true);
+    try smallLabel(u, t, c, projects_row.y - 18, translated("New projects"));
+    try pathRow(u, t, projects_row, s.project_language, changeLabel());
+    try button(u, t, rowButton(u, projects_row, changeLabel()), changeLabel(), same(s.hover, .change_project_language), true);
 
     // AI tools.
-    try sectionTitle(u, t, c, toolsTitle(s, u), "AI tools");
+    try sectionTitle(u, t, c, toolsTitle(s, u), translated("AI tools"));
     try u.text(.{
         .x = c.x,
         .y = toolsTitle(s, u) + title_step - 4,
         .w = c.w,
         .h = 18,
-    }, "Connect the AI tool you use once, and it works with every project.", .{
+    }, translated("Connect the AI tool you use once, and it works with every project."), .{
         .size = 13,
         .color = t.text2,
     });
@@ -355,14 +394,14 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = a.y,
         .w = a.w - 40,
         .h = a.h,
-    }, "Advanced", .{
+    }, translated("Advanced"), .{
         .size = 15,
         .weight = 600,
         .color = t.text,
     });
     if (!s.advanced) return;
 
-    try smallLabel(u, t, c, publrLabel(s, u), "Publr build");
+    try smallLabel(u, t, c, publrLabel(s, u), translated("Publr build"));
     const line: ui.Rect = .{
         .x = c.x,
         .y = publrLine(s, u),
@@ -370,7 +409,7 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
         .h = 20,
     };
     if (s.publr) |path| {
-        try u.text(line, "All projects run this build:", .{
+        try u.text(line, translated("All projects run this build:"), .{
             .size = 13,
             .color = t.text,
         });
@@ -389,7 +428,7 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
             .color = t.text,
         });
     } else {
-        try u.text(line, "Default: each project runs the Publr version it was made with.", .{
+        try u.text(line, translated("Default: each project runs the Publr version it was made with."), .{
             .size = 13,
             .color = t.text,
         });
@@ -399,12 +438,12 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = hintTop(s, u),
         .w = c.w,
         .h = 18,
-    }, "Projects switch when they next start. A project's own choice comes first.", .{
+    }, translated("Projects switch when they next start. A project's own choice comes first."), .{
         .size = 12,
         .color = t.text3,
     });
-    try button(u, t, chooseRect(s, u), choose_label, same(s.hover, .choose_publr), true);
-    if (s.publr != null) try button(u, t, clearRect(s, u), clear_label, same(s.hover, .clear_publr), true);
+    try button(u, t, chooseRect(s, u), chooseLabel(), same(s.hover, .choose_publr), true);
+    if (s.publr != null) try button(u, t, clearRect(s, u), clearLabel(), same(s.hover, .clear_publr), true);
 }
 
 /// A tool: its name, how it stands, and Connect (or a tick once it is connected).
@@ -416,10 +455,12 @@ fn drawTool(u: *ui.Ui, s: State, t: *const Theme, i: usize, tool: ai_tools.Row) 
         .w = r.w,
         .h = 1,
     }, t.border, 0);
+    // The words stop short of the button, however long it says.
+    const room: f32 = if (toolButton(s, u, i)) |b| b.w + 24 else 40;
     try u.text(.{
         .x = r.x,
         .y = r.y + 8,
-        .w = r.w - 160,
+        .w = r.w - room,
         .h = 18,
     }, tool.tool.name(), .{
         .size = 14,
@@ -429,7 +470,7 @@ fn drawTool(u: *ui.Ui, s: State, t: *const Theme, i: usize, tool: ai_tools.Row) 
     try u.text(.{
         .x = r.x,
         .y = r.y + 27,
-        .w = r.w - 160,
+        .w = r.w - room,
         .h = 16,
     }, tool.line, .{
         .size = 12,
@@ -451,6 +492,12 @@ fn drawTool(u: *ui.Ui, s: State, t: *const Theme, i: usize, tool: ai_tools.Row) 
 fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
     try u.rect(.{
         .x = s.left,
+        .y = s.top,
+        .w = s.width - s.left,
+        .h = header_height,
+    }, t.bg, 0);
+    try u.rect(.{
+        .x = s.left,
         .y = s.top + header_height - 1,
         .w = s.width - s.left,
         .h = 1,
@@ -460,7 +507,7 @@ fn drawHeader(u: *ui.Ui, s: State, t: *const Theme) !void {
         .y = s.top,
         .w = s.width - s.left - 2 * pad,
         .h = header_height,
-    }, "Settings", .{
+    }, translated("Settings"), .{
         .size = 13,
         .weight = 500,
         .color = t.text,
@@ -493,12 +540,13 @@ fn smallLabel(u: *ui.Ui, t: *const Theme, c: ui.Rect, top: f32, text: []const u8
     });
 }
 
-/// A path in a filled box, as a read-only field, leaving room for the row's button.
-fn pathRow(u: *ui.Ui, t: *const Theme, r: ui.Rect, path: []const u8) !void {
+/// A path in a filled box, as a read-only field, leaving room for the row's button (`label`).
+fn pathRow(u: *ui.Ui, t: *const Theme, r: ui.Rect, path: []const u8, label: []const u8) !void {
+    const room = @max(120, rowButton(u, r, label).w + 16);
     try u.box(.{
         .x = r.x,
         .y = r.y + 4,
-        .w = r.w - 120,
+        .w = r.w - room,
         .h = r.h - 8,
     }, .{
         .fill = t.hover,
@@ -507,7 +555,7 @@ fn pathRow(u: *ui.Ui, t: *const Theme, r: ui.Rect, path: []const u8) !void {
     try u.text(.{
         .x = r.x + 10,
         .y = r.y,
-        .w = r.w - 140,
+        .w = r.w - room - 20,
         .h = r.h,
     }, path, .{
         .size = 13,
