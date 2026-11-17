@@ -22,6 +22,7 @@ const settings = @import("settings.zig");
 const command_line = @import("command_line.zig");
 const welcome = @import("welcome.zig");
 const ai_tools = @import("ai_tools.zig");
+const i18n = @import("i18n.zig");
 const Cloud = @import("cloud.zig").Cloud;
 const deploying = @import("deploy.zig");
 
@@ -158,7 +159,28 @@ var open_sheet: ?enum {
     admin,
     /// The first time Desktop opens: Publr Cloud, or an email of your own.
     welcome,
+    /// Settings' language: Desktop's own, or new projects' (`language_of`).
+    language,
 } = null;
+/// Which language the language sheet chooses, and the option picked in it.
+var language_of: enum { app, projects } = .app;
+var language_pick: usize = 0;
+/// Desktop's language, as chosen (`support_dir/language`).
+var app_language: i18n.Choice = .system;
+/// New projects' languages, in the order the sheet offers them.
+const project_languages = [_]struct {
+    code: []const u8,
+    label: []const u8,
+}{
+    .{
+        .code = "",
+        .label = "English",
+    },
+    .{
+        .code = "pl",
+        .label = "Polski",
+    },
+};
 var deploy_progress: deploying.Progress = .{};
 var auto_deploy = false;
 var last_stage: ?deploying.Stage = null;
@@ -247,6 +269,7 @@ pub fn main(init: std.process.Init) !void {
     };
     support_dir = try std.fs.path.join(gpa, &.{ home_dir, "Library/Application Support/Publr Desktop" });
     Io.Dir.cwd().createDirPath(io, support_dir) catch {};
+    loadAppLanguage();
     native.spawn(command_line.ensure, .{ gpa, io, env }) catch {};
 
     native.init(app_name);
@@ -1827,6 +1850,7 @@ fn adminProblem(email: []const u8) ?[]const u8 {
 
 fn sheetState(fields: *[1]sheet.Field) sheet.State {
     if (open_sheet == .admin) return adminState(fields);
+    if (open_sheet == .language) return languageState();
     if (open_sheet == .deploy) return deployState(fields);
     if (open_sheet == .deployed) return deployedState();
     var state = if (new_where == .cloud and cloudOffered()) projectState(fields) else localState(fields);
@@ -1892,7 +1916,11 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
             .cancel => if (deploy_job == null) closeSheet(),
             .link => native.openInBrowser(accounts_docs),
             .option => |i| {
-                new_where = if (i == 1) .cloud else .local;
+                if (open_sheet == .language) {
+                    language_pick = i;
+                } else {
+                    new_where = if (i == 1) .cloud else .local;
+                }
                 sheet_error = null;
                 redrawAll();
             },
@@ -1916,7 +1944,7 @@ fn sheetField() *ui.TextField {
 
 /// The sheet takes typing (the deployed and welcome sheets have no field).
 fn sheetTypes() bool {
-    return open_sheet != .deployed and open_sheet != .welcome and sheet_busy == null and deploy_job == null;
+    return open_sheet != .deployed and open_sheet != .welcome and open_sheet != .language and sheet_busy == null and deploy_job == null;
 }
 
 fn fieldChanged() void {
@@ -1932,6 +1960,7 @@ fn primaryAction() void {
     switch (open_sheet orelse return) {
         .new_project => if (new_where == .cloud and cloudOffered()) createProject() else createSite(),
         .admin => saveAdmin(),
+        .language => saveLanguage(),
         // The welcome stays until the browser answers: signed in closes it, a no is said on it.
         .welcome => if (cloud.status == .signed_out) {
             cloud.signIn();
@@ -2889,6 +2918,7 @@ test {
     _ = project;
     _ = sites_module;
     _ = settings;
+    _ = i18n;
 }
 
 // Settings: where sites live, the command in Terminal, and the build every project runs.
@@ -2906,6 +2936,95 @@ var settings_shown: []const []const u8 = &.{};
 var settings_publr: ?[]const u8 = null;
 /// The admin set for new sites (`publr config admin`); empty when none is.
 var settings_admin: []const u8 = "";
+/// New projects' language (`pl`), empty for English.
+var settings_language: []const u8 = "";
+
+fn projectLanguageLabel(code: []const u8) []const u8 {
+    for (project_languages) |l| if (std.mem.eql(u8, l.code, code)) return l.label;
+    return code;
+}
+
+fn appLanguagePath(buf: []u8) []const u8 {
+    return std.fmt.bufPrint(buf, "{s}/language", .{support_dir}) catch "";
+}
+
+/// Desktop's language as last chosen; the Mac's when none was.
+fn loadAppLanguage() void {
+    var pb: [1024]u8 = undefined;
+    var buf: [16]u8 = undefined;
+    const text = Io.Dir.cwd().readFile(io, appLanguagePath(&pb), &buf) catch "";
+    app_language = std.meta.stringToEnum(i18n.Choice, std.mem.trim(u8, text, " \n")) orelse .system;
+    i18n.use(app_language);
+}
+
+fn openLanguageSheet(of: @TypeOf(language_of)) void {
+    language_of = of;
+    language_pick = switch (of) {
+        .app => @intFromEnum(app_language),
+        .projects => for (project_languages, 0..) |l, i| {
+            if (std.mem.eql(u8, l.code, settings_language)) break i;
+        } else 0,
+    };
+    open_sheet = .language;
+    sheet_error = null;
+    sheet_hover = .none;
+    redrawAll();
+}
+
+fn languageState() sheet.State {
+    const size = window.size();
+    const app = language_of == .app;
+    return .{
+        .title = if (app) "Publr Desktop's language" else "New projects' language",
+        .description = if (app) "The language Publr Desktop speaks to you." else "Every project you make starts in this language: its admin speaks it, and its first account too.",
+        .choice = .{
+            .label = "Language",
+            .options = if (app) &.{ i18n.Choice.system.label(), "English", "Polski" } else &.{ "English", "Polski" },
+            .selected = language_pick,
+        },
+        .fields = &.{},
+        .primary = "Save",
+        .primary_enabled = true,
+        .hover = sheet_hover,
+        .window_width = @floatCast(size.w),
+        .window_height = @floatCast(size.h),
+    };
+}
+
+fn saveLanguage() void {
+    switch (language_of) {
+        .app => {
+            const choice: i18n.Choice = @enumFromInt(language_pick);
+            var pb: [1024]u8 = undefined;
+            Io.Dir.cwd().writeFile(io, .{
+                .sub_path = appLanguagePath(&pb),
+                .data = @tagName(choice),
+            }) catch {
+                sheet_error = "The setting could not be saved.";
+                return redrawAll();
+            };
+            app_language = choice;
+            i18n.use(choice);
+            buildMenus();
+        },
+        .projects => {
+            var arena: std.heap.ArenaAllocator = .init(gpa);
+            defer arena.deinit();
+            var config = core.Config.load(io, arena.allocator(), env_map) catch {
+                sheet_error = "The setting could not be saved.";
+                return redrawAll();
+            };
+            config.language = project_languages[language_pick].code;
+            config.save() catch {
+                sheet_error = "The setting could not be saved.";
+                return redrawAll();
+            };
+        },
+    }
+    closeSheet();
+    loadSettings();
+    redrawAll();
+}
 /// Advanced is unfolded (for this run only).
 var settings_advanced = false;
 var settings_busy: ?[]const u8 = null;
@@ -2941,6 +3060,7 @@ fn loadSettings() void {
     settings_shown = shown;
     settings_publr = if (config.publr.len > 0) shortFolder(a, config.publr) else null;
     settings_admin = config.admin;
+    settings_language = config.language;
 }
 
 
@@ -2962,6 +3082,8 @@ fn settingsState() settings.State {
         .folders = settings_shown,
         .publr = settings_publr,
         .admin = settingsAdmin(),
+        .app_language = app_language.label(),
+        .project_language = projectLanguageLabel(settings_language),
         .tools = tools.rows(&tool_rows),
         .advanced = settings_advanced,
         .busy = settings_busy,
@@ -2977,6 +3099,8 @@ fn clickSettings(t: settings.Target) void {
     switch (t) {
         .change_folder => chooseFolder(.default),
         .change_admin => openAdminSheet(),
+        .change_app_language => openLanguageSheet(.app),
+        .change_project_language => openLanguageSheet(.projects),
         .connect_tool => |tool| tools.connect(tool),
         .add_folder => chooseFolder(.add),
         .remove_folder => |i| removeFolder(i),

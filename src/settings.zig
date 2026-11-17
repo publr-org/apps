@@ -43,6 +43,9 @@ pub const State = struct {
     publr: ?[]const u8,
     /// Who every new site gets as its admin, as people read it ("Your Cloud account", an email).
     admin: []const u8,
+    /// The language Desktop speaks, and the one new projects start in, as people read them.
+    app_language: []const u8,
+    project_language: []const u8,
     /// The AI tools, one row each.
     tools: []const ai_tools.Row,
     /// Advanced is unfolded.
@@ -60,6 +63,8 @@ pub const Target = union(enum) {
     add_folder,
     remove_folder: usize,
     change_admin,
+    change_app_language,
+    change_project_language,
     connect_tool: ai_tools.Tool,
     advanced,
     choose_publr,
@@ -117,9 +122,23 @@ fn adminChangeRect(s: State, u: *ui.Ui) ui.Rect {
     return rowButton(u, adminRow(s, u), change_label);
 }
 
-fn toolsTitle(s: State, u: *ui.Ui) f32 {
+fn languageTitle(s: State, u: *ui.Ui) f32 {
     const admin = adminRow(s, u);
     return admin.y + admin.h + section_gap;
+}
+
+fn appLanguageRow(s: State, u: *ui.Ui) ui.Rect {
+    return row(s, languageTitle(s, u) + title_step + 18, 0);
+}
+
+fn projectLanguageRow(s: State, u: *ui.Ui) ui.Rect {
+    const app = appLanguageRow(s, u);
+    return row(s, app.y + app.h + 16 + 18, 0);
+}
+
+fn toolsTitle(s: State, u: *ui.Ui) f32 {
+    const projects = projectLanguageRow(s, u);
+    return projects.y + projects.h + section_gap;
 }
 
 /// Each tool's row: its name and how it stands, its button at the right end.
@@ -239,6 +258,8 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     for (0..s.folders.len) |i| if (removeRect(s, u, i).contains(x, y)) return .{ .remove_folder = i };
     if (addRect(s, u).contains(x, y)) return .add_folder;
     if (adminChangeRect(s, u).contains(x, y)) return .change_admin;
+    if (rowButton(u, appLanguageRow(s, u), change_label).contains(x, y)) return .change_app_language;
+    if (rowButton(u, projectLanguageRow(s, u), change_label).contains(x, y)) return .change_project_language;
     for (s.tools, 0..) |tool, i| if (toolButton(s, u, i)) |b| if (b.contains(x, y)) return .{ .connect_tool = tool.tool };
     if (advancedRect(s, u).contains(x, y)) return .advanced;
     if (!s.advanced) return .none;
@@ -295,6 +316,17 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme) !void {
     try sectionTitle(u, t, c, newSitesTitle(s, u), "Default account email");
     try pathRow(u, t, adminRow(s, u), s.admin);
     try button(u, t, adminChangeRect(s, u), change_label, same(s.hover, .change_admin), true);
+
+    // Language.
+    try sectionTitle(u, t, c, languageTitle(s, u), "Language");
+    const app_row = appLanguageRow(s, u);
+    try smallLabel(u, t, c, app_row.y - 18, "Publr Desktop");
+    try pathRow(u, t, app_row, s.app_language);
+    try button(u, t, rowButton(u, app_row, change_label), change_label, same(s.hover, .change_app_language), true);
+    const projects_row = projectLanguageRow(s, u);
+    try smallLabel(u, t, c, projects_row.y - 18, "New projects");
+    try pathRow(u, t, projects_row, s.project_language);
+    try button(u, t, rowButton(u, projects_row, change_label), change_label, same(s.hover, .change_project_language), true);
 
     // AI tools.
     try sectionTitle(u, t, c, toolsTitle(s, u), "AI tools");

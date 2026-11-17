@@ -49,6 +49,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    add_languages(b, exe.root_module, target, optimize);
     b.installArtifact(exe);
     // Beside Desktop in zig-out/bin too, so `zig build run` finds it as the app does.
     b.installArtifact(cli.artifact("publr"));
@@ -92,6 +93,19 @@ pub fn build(b: *std.Build) void {
     b.step("run", "Open Publr Desktop").dependOn(&run.step);
 
     add_web(b, optimize);
+}
+
+/// Desktop's words in other languages: Publr's own catalogue (PO files, plural rules), and
+/// one PO file per language, `i18n/<language>.po`.
+fn add_languages(b: *std.Build, module: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.Optimize) void {
+    module.addImport("publr_i18n", b.createModule(.{
+        .root_source_file = b.path("../publr/src/model/i18n/catalog.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
+    module.addAnonymousImport("desktop_pl", .{
+        .root_source_file = b.path("i18n/pl.po"),
+    });
 }
 
 /// `zig build web`: Desktop for a browser page (wasm32-wasi), `zig-out/web/publr-desktop.wasm`,
@@ -143,6 +157,7 @@ fn add_web(b: *std.Build, optimize: std.builtin.Optimize) void {
             },
         }),
     });
+    add_languages(b, wasm.root_module, target, optimize);
     // The page calls the backend's `desktop_*` functions.
     wasm.rdynamic = true;
     const install = b.addInstallArtifact(wasm, .{
