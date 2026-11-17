@@ -32,6 +32,7 @@ const home_row: f32 = 36;
 const apps_label: f32 = 30;
 /// A folded sidebar's buttons and app pictures.
 const folded_tile: f32 = 40;
+const folded_gap: f32 = 8;
 /// Over the site or admin: where the page is (this Mac or Cloud), its address, and Open in
 /// browser. The web view lies under it.
 pub const address_bar_height: f32 = 44;
@@ -216,10 +217,11 @@ const button_text: ui.TextStyle = .{
 /// folded).
 fn sideCardRect(s: State, k: usize) ui.Rect {
     if (s.folded) {
-        const gap: f32 = if (k == 0) 0 else 18;
+        // The fold button, Project home, a line, then the apps: one size, one gap.
+        const line: f32 = if (k == 0) 0 else folded_gap + 1;
         return .{
             .x = (sidebar_folded - folded_tile) / 2,
-            .y = s.top + 60 + gap + (folded_tile + 8) * @as(f32, @floatFromInt(k)),
+            .y = foldRect(s).y + (folded_tile + folded_gap) * @as(f32, @floatFromInt(k + 1)) + line,
             .w = folded_tile,
             .h = folded_tile,
         };
@@ -242,9 +244,15 @@ fn sideCardRect(s: State, k: usize) ui.Rect {
 
 /// The button that folds the sidebar or unfolds it.
 fn foldRect(s: State) ui.Rect {
+    if (s.folded) return .{
+        .x = (sidebar_folded - folded_tile) / 2,
+        .y = s.top + (sidebar_folded - folded_tile) / 2,
+        .w = folded_tile,
+        .h = folded_tile,
+    };
     const size: f32 = 28;
     return .{
-        .x = if (s.folded) (sidebar_folded - size) / 2 else sidebar_width - side_pad - size,
+        .x = sidebar_width - side_pad - size,
         .y = s.top + 16,
         .w = size,
         .h = size,
@@ -802,7 +810,7 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
     }, t.border, 0);
 
     const fold = foldRect(s);
-    if (same(s.hover, .fold)) try u.rect(fold, t.hover, 6);
+    if (same(s.hover, .fold)) try u.rect(fold, t.hover, 8);
     try u.icon(centred(fold, 16), if (s.folded) icons.chevron_right else icons.chevron_left, t.text2);
 
     if (!s.folded) {
@@ -819,7 +827,7 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
         try statusLine(u, t, side_pad + 2, s.top + 42, sidebar_width - 2 * side_pad, s);
     }
 
-    const list_top = if (s.folded) s.top + 56 else s.top + side_head - 4;
+    const list_top = if (s.folded) sideCardRect(s, 0).y else s.top + side_head - 4;
     try u.beginClip(.{
         .x = 0,
         .y = list_top,
@@ -827,6 +835,16 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
         .h = s.height - side_foot - list_top,
     });
     try homeRow(u, s, t);
+    // Folded, a line between Project home and the apps.
+    if (s.folded and s.apps.len > 0) {
+        const home_tile = sideCardRect(s, 0);
+        try u.rect(.{
+            .x = home_tile.x + 8,
+            .y = home_tile.y + home_tile.h + folded_gap,
+            .w = home_tile.w - 16,
+            .h = 1,
+        }, t.border, 0);
+    }
     if (!s.folded and s.apps.len > 0) try u.text(.{
         .x = side_pad + 2,
         .y = s.top + side_head + home_row + 8,
