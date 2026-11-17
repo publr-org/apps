@@ -91,6 +91,8 @@ pub const State = struct {
     /// Shown instead of the buttons while the work runs ("Making the site…").
     busy: ?[]const u8 = null,
     hover: Target,
+    /// Filled in here: which fields' notes take two lines.
+    long_notes: [2]bool = @splat(false),
     window_width: f32,
     window_height: f32,
 };
@@ -113,9 +115,32 @@ fn choiceHeight(s: State) f32 {
     return if (s.choice != null) choice_step else 0;
 }
 
+/// A field's room: one more line when its note takes two (`State.long_notes`).
+fn fieldStep(s: State, i: usize) f32 {
+    const long = i < s.long_notes.len and s.long_notes[i];
+    return field_step + if (long) note_line else 0;
+}
+
+const note_line: f32 = 16;
+const note_style: ui.TextStyle = .{
+    .size = 12,
+};
+
+/// `s` with each note's lines measured, as layout and drawing need them.
+fn measured(s: State, u: *ui.Ui) State {
+    var out = s;
+    const room = width - 2 * pad;
+    for (s.fields, 0..) |f, i| {
+        if (i >= out.long_notes.len) break;
+        const note = f.note orelse continue;
+        out.long_notes[i] = u.measure(note.text, note_style) > room;
+    }
+    return out;
+}
+
 fn panel(s: State) ui.Rect {
     var h: f32 = pad + headHeight(s) + choiceHeight(s);
-    h += @as(f32, @floatFromInt(s.fields.len)) * field_step;
+    for (0..s.fields.len) |i| h += fieldStep(s, i);
     h += 12 + button_height + pad;
     return .{
         .x = (s.window_width - width) / 2,
@@ -127,9 +152,11 @@ fn panel(s: State) ui.Rect {
 
 fn fieldRect(s: State, i: usize) ui.Rect {
     const p = panel(s);
+    var above: f32 = 0;
+    for (0..i) |j| above += fieldStep(s, j);
     return .{
         .x = p.x + pad,
-        .y = p.y + pad + headHeight(s) + choiceHeight(s) + @as(f32, @floatFromInt(i)) * field_step + 22,
+        .y = p.y + pad + headHeight(s) + choiceHeight(s) + above + 22,
         .w = p.w - 2 * pad,
         .h = field_height,
     };
@@ -169,7 +196,8 @@ fn buttonRect(s: State, u: *ui.Ui, which: Target) ui.Rect {
     };
 }
 
-pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
+pub fn hit(given: State, u: *ui.Ui, x: f64, y: f64) Target {
+    const s = measured(given, u);
     if (s.busy == null) {
         if (buttonRect(s, u, .primary).contains(x, y)) return .primary;
         if (buttonRect(s, u, .cancel).contains(x, y)) return .cancel;
@@ -182,7 +210,8 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     return .none;
 }
 
-pub fn draw(u: *ui.Ui, s: State, t: *const Theme, focus: ?usize, window: *native.Window) !void {
+pub fn draw(u: *ui.Ui, given: State, t: *const Theme, focus: ?usize, window: *native.Window) !void {
+    const s = measured(given, u);
     // The window dimmed behind it.
     try u.rect(.{
         .x = 0,
@@ -282,9 +311,10 @@ pub fn draw(u: *ui.Ui, s: State, t: *const Theme, focus: ?usize, window: *native
             .x = r.x,
             .y = r.y + r.h + 5,
             .w = r.w,
-            .h = 16,
+            .h = if (i < s.long_notes.len and s.long_notes[i]) 2 * note_line else note_line,
         }, n.text, .{
-            .size = 12,
+            .size = note_style.size,
+            .truncate = false,
             .color = switch (n.kind) {
                 .hint => t.text2,
                 .good => t.running,

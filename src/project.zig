@@ -135,6 +135,9 @@ pub const Target = union(enum) {
     open_browser,
     /// The sidebar folded to a strip, or unfolded.
     fold,
+    /// An app card's Edit (its name and path) and Remove.
+    edit_app: usize,
+    remove_app: usize,
     /// The address bar's Back, Forward and Reload.
     back,
     forward,
@@ -394,6 +397,33 @@ fn cardWidth(s: State) f32 {
 fn cardHeight(s: State) f32 {
     return cardWidth(s) * card_thumb_ratio + card_body + card_foot;
 }
+
+/// A card's foot: Remove at its right end, Edit before it.
+fn appRemoveRect(s: State, u: *ui.Ui, k: usize) ui.Rect {
+    const r = cardRect(s, k);
+    const w = u.measure(translated("Remove"), foot_text) + 16;
+    return .{
+        .x = r.x + r.w - 10 - w,
+        .y = r.y + r.h - card_foot,
+        .w = w,
+        .h = card_foot,
+    };
+}
+
+fn appEditRect(s: State, u: *ui.Ui, k: usize) ui.Rect {
+    const remove = appRemoveRect(s, u, k);
+    const w = u.measure(translated("Edit"), foot_text) + 16;
+    return .{
+        .x = remove.x - w,
+        .y = remove.y,
+        .w = w,
+        .h = remove.h,
+    };
+}
+
+const foot_text: ui.TextStyle = .{
+    .size = 12,
+};
 
 fn cardRect(s: State, k: usize) ui.Rect {
     const n = columns(s);
@@ -662,7 +692,11 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (s.callout == .unsent or s.callout == .waiting) {
         if (calloutButton(s, u).contains(x, y)) return .callout;
     }
-    for (0..s.apps.len) |k| if (cardRect(s, k).contains(x, y)) return .{ .app = k };
+    for (0..s.apps.len) |k| {
+        if (appEditRect(s, u, k).contains(x, y)) return .{ .edit_app = k };
+        if (appRemoveRect(s, u, k).contains(x, y)) return .{ .remove_app = k };
+        if (cardRect(s, k).contains(x, y)) return .{ .app = k };
+    }
     var list: [5]Detail = undefined;
     const shown = details(s, &list);
     if (s.folder.len > 0 and finderRect(s, u, shown).contains(x, y)) return .finder;
@@ -1375,9 +1409,17 @@ fn appCard(u: *ui.Ui, s: State, t: *const Theme, app: App, k: usize) !void {
         .y = foot.y,
         .w = foot.w - 36,
         .h = foot.h,
-    }, if (app.address.len > 0) hostOf(app.address) else app.mount, .{
+    }, app.mount, .{
         .size = 12,
         .color = t.text2,
+    });
+    for ([_]struct { ui.Rect, []const u8, Target }{
+        .{ appEditRect(s, u, k), translated("Edit"), .{ .edit_app = k } },
+        .{ appRemoveRect(s, u, k), translated("Remove"), .{ .remove_app = k } },
+    }) |b| try u.text(b[0], b[1], .{
+        .size = foot_text.size,
+        .color = if (same(s.hover, b[2])) t.text else t.text2,
+        .@"align" = .center,
     });
     try u.box(r, .{
         .border = if (hovered) t.input else t.border,

@@ -671,3 +671,57 @@ msgstr "Kopiuj ustawienia"
 
 msgid "Project home"
 msgstr "Strona projektu"
+
+msgid "Another app already uses this path. Choose a different path."
+msgstr "Inna aplikacja używa już tej ścieżki. Wybierz inną."
+
+msgid "Couldn’t save the change. Check the name and path, then try again. Reserved paths such as /admin and /api cannot be used."
+msgstr "Nie udało się zapisać zmiany. Sprawdź nazwę i ścieżkę, i spróbuj ponownie. Zarezerwowanych ścieżek, takich jak /admin i /api, nie można użyć."
+
+msgid "App name"
+msgstr "Nazwa aplikacji"
+
+msgid "URL path"
+msgstr "Ścieżka URL"
+
+msgid "Changing the path changes the app’s address. Its content stays in place."
+msgstr "Zmiana ścieżki zmienia adres aplikacji. Jej treść zostaje na miejscu."
+
+msgid "Edit app"
+msgstr "Edytuj aplikację"
+
+msgid "Save app"
+msgstr "Zapisz aplikację"
+
+msgid "Remove {app}?"
+msgstr "Usunąć {app}?"
+
+msgid "The app will go offline. Its files are archived and its content is kept."
+msgstr "Aplikacja przestanie działać. Jej pliki trafią do archiwum, a treść zostanie zachowana."
+
+msgid "Remove app"
+msgstr "Usuń aplikację"
+
+msgid "Saving…"
+msgstr "Zapisywanie…"
+
+msgid "The change could not be saved."
+msgstr "Nie udało się zapisać zmiany."
+
+msgid "Project name"
+msgstr "Nazwa projektu"
+
+msgid "my-project"
+msgstr "moj-projekt"
+
+msgid "Also the folder’s name. Made from the name when left empty."
+msgstr "To także nazwa folderu. Puste powstaje z nazwy projektu."
+
+msgid "Give it a name. You can add apps once it’s made."
+msgstr "Nadaj mu nazwę. Aplikacje dodasz, gdy już powstanie."
+
+msgid "The six characters at the end keep every address unique. Made from the name when left empty."
+msgstr "Sześć znaków na końcu sprawia, że każdy adres jest unikalny. Puste powstaje z nazwy projektu."
+
+msgid "Edit"
+msgstr "Edytuj"

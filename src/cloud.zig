@@ -160,8 +160,9 @@ pub const Cloud = struct {
     }
 
     /// Makes a project named `name` in `space`, with the starter page, as the dashboard's
-    /// New project does; `done` gets its address, or Cloud's reason, on the main thread.
-    pub fn createProject(self: *Cloud, space: []const u8, name: []const u8, done: *const fn (made: Made) void) void {
+    /// New project does: `slug` its address before the six `suffix` characters (empty: made
+    /// from the name). `done` gets its address, or Cloud's reason, on the main thread.
+    pub fn createProject(self: *Cloud, space: []const u8, name: []const u8, slug: []const u8, suffix: []const u8, done: *const fn (made: Made) void) void {
         const token = self.token orelse return;
         var buf: [256]u8 = undefined;
         const job = self.gpa.create(Create) catch return;
@@ -170,10 +171,33 @@ pub const Cloud = struct {
             .domain = self.gpa.dupe(u8, self.projectDomain(&buf)) catch return,
             .space = self.gpa.dupe(u8, space) catch return,
             .name = self.gpa.dupe(u8, name) catch return,
+            .slug = self.gpa.dupe(u8, slug) catch return,
+            .suffix = self.gpa.dupe(u8, suffix) catch return,
             .token = self.gpa.dupe(u8, token) catch return,
             .done = done,
         };
         native.spawn(Create.run, .{job}) catch return;
+    }
+
+    /// Changes an app of the project `slug` on Cloud: `action` is `update` (`label` and `path`)
+    /// or `remove`.
+    pub fn manageApp(self: *Cloud, slug: []const u8, action: []const u8, app: []const u8, label: []const u8, path: []const u8, done: *const fn (problem: ?[]const u8) void) void {
+        const token = self.token orelse return done(translated("Publr Cloud could not be reached."));
+        const sent = std.json.Stringify.valueAlloc(self.gpa, .{
+            .project = slug,
+            .action = action,
+            .app = app,
+            .label = label,
+            .path = path,
+        }, .{}) catch return;
+        const job = self.gpa.create(ManageApp) catch return;
+        job.* = .{
+            .cloud = self,
+            .token = self.gpa.dupe(u8, token) catch return,
+            .sent = sent,
+            .done = done,
+        };
+        native.spawn(ManageApp.run, .{job}) catch return;
     }
 
     /// Signs in to the project `slug` as the member, as the dashboard's `/sign-on` does: `done`
@@ -251,6 +275,44 @@ const Check = struct {
     }
 };
 
+/// An app of a Cloud project changed (`update`: its name and path) or removed, as the
+/// dashboard's app cards do: `cloud.manage_apps`. `done` gets why not, or null.
+const ManageApp = struct {
+    cloud: *Cloud,
+    token: []u8,
+    /// The request, written whole on the main thread.
+    sent: []u8,
+    problem: ?[]const u8 = null,
+    done: *const fn (problem: ?[]const u8) void,
+
+    fn run(self: *ManageApp) void {
+        var arena: std.heap.ArenaAllocator = .init(self.cloud.gpa);
+        defer arena.deinit();
+        self.problem = translated("Publr Cloud could not be reached.");
+        if (request(self.cloud.io, arena.allocator(), self.cloud.base, .POST, "/api/cloud.manage_apps", .{
+            .token = self.token,
+            .payload = self.sent,
+            .content_type = "application/json",
+        })) |reply| {
+            self.problem = switch (reply.status) {
+                .ok => null,
+                .conflict => translated("Another app already uses this path. Choose a different path."),
+                else => translated("Couldn\u{2019}t save the change. Check the name and path, then try again. Reserved paths such as /admin and /api cannot be used."),
+            };
+        } else |_| {}
+        native.runOnMain(self, finish);
+    }
+
+    fn finish(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *ManageApp = @ptrCast(@alignCast(ctx));
+        const gpa = self.cloud.gpa;
+        self.done(self.problem);
+        gpa.free(self.sent);
+        gpa.free(self.token);
+        gpa.destroy(self);
+    }
+};
+
 /// A project made, or why not: `address` is its site's, `problem` Cloud's words.
 pub const Made = struct {
     name: []const u8,
@@ -264,6 +326,8 @@ const Create = struct {
     domain: []u8,
     space: []u8,
     name: []u8,
+    slug: []u8,
+    suffix: []u8,
     token: []u8,
     arena: ?std.heap.ArenaAllocator = null,
     made: Made = .{
@@ -281,6 +345,8 @@ const Create = struct {
         const sent = std.json.Stringify.valueAlloc(a, .{
             .space = self.space,
             .name = self.name,
+            .slug = self.slug,
+            .suffix = self.suffix,
         }, .{}) catch return native.runOnMain(self, finish);
         if (request(self.cloud.io, a, self.cloud.base, .POST, "/api/cloud.create_project", .{
             .token = self.token,
@@ -313,6 +379,8 @@ const Create = struct {
         gpa.free(self.domain);
         gpa.free(self.space);
         gpa.free(self.name);
+        gpa.free(self.slug);
+        gpa.free(self.suffix);
         gpa.free(self.token);
         gpa.destroy(self);
     }

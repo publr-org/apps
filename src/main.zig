@@ -23,6 +23,7 @@ const command_line = @import("command_line.zig");
 const welcome = @import("welcome.zig");
 const ai_tools = @import("ai_tools.zig");
 const i18n = @import("i18n.zig");
+const apps_edit = @import("apps_edit.zig");
 const translated = i18n.translated;
 const translated_count = i18n.translated_count;
 const fill = i18n.fill;
@@ -164,7 +165,16 @@ var open_sheet: ?enum {
     welcome,
     /// Settings' language: Desktop's own, or new projects' (`language_of`).
     language,
+    /// An app's name and path, from its card's Edit.
+    edit_app,
+    /// An app's removal, from its card's Remove.
+    remove_app,
 } = null;
+/// The project tab and the app the app sheets are for.
+var app_tab: usize = 0;
+var app_index: usize = 0;
+var app_label_field: ui.TextField = undefined;
+var app_path_field: ui.TextField = undefined;
 /// Which language the language sheet chooses, and the option picked in it.
 var language_of: enum { app, projects } = .app;
 var language_pick: usize = 0;
@@ -208,6 +218,14 @@ var sheet_error: ?[]const u8 = null;
 var problem_text: []const u8 = "";
 var sheet_busy: ?[]const u8 = null;
 var name_field: ui.TextField = undefined;
+/// New project's address, made from the name until it is typed in.
+var slug_field: ui.TextField = undefined;
+var slug_edited = false;
+/// The six characters after a Cloud project's address, made here so the address shown is
+/// the one kept, as the dashboard's New project does.
+var new_suffix: [6]u8 = undefined;
+/// The sheet's field that has the keyboard.
+var sheet_focus: usize = 0;
 /// A new site's first admin (an email), and Settings' admin for new sites.
 var admin_field: ui.TextField = undefined;
 /// The admin set for new sites, read when a sheet opens that asks for one.
@@ -297,6 +315,9 @@ pub fn main(init: std.process.Init) !void {
     };
     tools.check();
     name_field = .init(gpa);
+    slug_field = .init(gpa);
+    app_label_field = .init(gpa);
+    app_path_field = .init(gpa);
     address_field = .init(gpa);
     admin_field = .init(gpa);
     cloud = .init(gpa, io, env.get("DESKTOP_CLOUD") orelse "https://cloud.publr.app", cloudChanged);
@@ -1239,6 +1260,148 @@ fn openProjectTab(name: []const u8, folder: []const u8, live: []const u8, space:
     showTab(tabs.items.len - 1);
 }
 
+// An app's Edit and Remove, from its card: on this Mac its folder changes and its server
+// loads the apps again; on Cloud, Cloud does it, as the dashboard's cards do.
+
+fn openAppSheet(tab: usize, k: usize, which: @TypeOf(open_sheet)) void {
+    const pt = tabs.items[tab].project orelse return;
+    if (k >= pt.apps.len) return;
+    app_tab = tab;
+    app_index = k;
+    app_label_field.set(pt.apps[k].label);
+    app_path_field.set(pt.apps[k].mount);
+    open_sheet = which;
+    sheet_focus = 0;
+    sheet_error = null;
+    sheet_busy = null;
+    sheet_hover = .none;
+    window.setTextInput(which == .edit_app);
+    redrawAll();
+}
+
+fn sheetApp() ?struct { *ProjectTab, project.App } {
+    if (app_tab >= tabs.items.len) return null;
+    const pt = tabs.items[app_tab].project orelse return null;
+    if (app_index >= pt.apps.len) return null;
+    return .{ pt, pt.apps[app_index] };
+}
+
+fn editAppState(fields: *[2]sheet.Field) sheet.State {
+    const size = window.size();
+    fields[0] = .{
+        .label = translated("App name"),
+        .field = &app_label_field,
+        .note = if (sheet_error) |e| .{
+            .text = e,
+            .kind = .bad,
+        } else null,
+    };
+    fields[1] = .{
+        .label = translated("URL path"),
+        .field = &app_path_field,
+        .note = .{
+            .text = translated("Changing the path changes the app\u{2019}s address. Its content stays in place."),
+        },
+    };
+    return .{
+        .title = translated("Edit app"),
+        .description = "",
+        .fields = fields[0..2],
+        .primary = translated("Save app"),
+        .primary_enabled = std.mem.trim(u8, app_label_field.value(), " ").len > 0 and app_path_field.value().len > 0,
+        .busy = sheet_busy,
+        .hover = sheet_hover,
+        .window_width = @floatCast(size.w),
+        .window_height = @floatCast(size.h),
+    };
+}
+
+fn removeAppState() sheet.State {
+    const size = window.size();
+    const label = if (sheetApp()) |found| found[1].label else "";
+    return .{
+        .title = filled(frame_arena.allocator(), translated("Remove {app}?"), .{
+            .app = label,
+        }) catch "",
+        .description = sheet_error orelse translated("The app will go offline. Its files are archived and its content is kept."),
+        .fields = &.{},
+        .primary = translated("Remove app"),
+        .primary_enabled = true,
+        .busy = sheet_busy,
+        .hover = sheet_hover,
+        .window_width = @floatCast(size.w),
+        .window_height = @floatCast(size.h),
+    };
+}
+
+fn saveApp() void {
+    changeApp("update");
+}
+
+fn removeApp() void {
+    changeApp("remove");
+}
+
+fn changeApp(action: []const u8) void {
+    if (sheet_busy != null) return;
+    const found = sheetApp() orelse return closeSheet();
+    const pt = found[0];
+    const app = found[1];
+    const remove = std.mem.eql(u8, action, "remove");
+    const label = std.mem.trim(u8, app_label_field.value(), " ");
+    const path = std.mem.trim(u8, app_path_field.value(), " ");
+    if (pt.folder.len == 0) {
+        sheet_busy = translated("Saving\u{2026}");
+        redrawAll();
+        return cloud.manageApp(syncing.slugOf(pt.live), action, app.name, label, path, appChangedOnCloud);
+    }
+    var db: [512]u8 = undefined;
+    const folder = siteDir(&db, pt.folder);
+    const done = if (remove) apps_edit.remove(io, gpa, folder, app.name) else apps_edit.update(io, gpa, folder, app.name, label, path);
+    done catch |e| {
+        sheet_error = switch (e) {
+            error.Conflict => translated("Another app already uses this path. Choose a different path."),
+            error.Invalid => translated("Couldn\u{2019}t save the change. Check the name and path, then try again. Reserved paths such as /admin and /api cannot be used."),
+            else => translated("The change could not be saved."),
+        };
+        return redrawAll();
+    };
+    // The running server loads the apps again; the card shows them as they are now.
+    const folder_copy = gpa.dupe(u8, folder) catch "";
+    native.spawn(loadApps, .{folder_copy}) catch {};
+    const s = sites.find(pt.folder);
+    const base = if (pt.live.len > 0) pt.live else if (s) |found_site| found_site.address else "";
+    pt.apps = project.readApps(io, pt.arena.allocator(), folder, base);
+    takeAppThumbs(pt.folder, pt.apps);
+    closeSheet();
+}
+
+/// `publr apps load` in the project's folder, off the main thread.
+fn loadApps(folder: []const u8) void {
+    defer gpa.free(folder);
+    if (folder.len == 0) return;
+    const result = std.process.run(gpa, io, .{
+        .argv = &.{ sites.command_path, "--as-admin", "apps", "load" },
+        .cwd = .{
+            .path = folder,
+        },
+        .environ_map = env_map,
+    }) catch return;
+    if (result.term != .exited or result.term.exited != 0) std.debug.print("desktop: apps load in {s}: {s}\n", .{ folder, result.stderr });
+    gpa.free(result.stdout);
+    gpa.free(result.stderr);
+}
+
+fn appChangedOnCloud(problem: ?[]const u8) void {
+    sheet_busy = null;
+    if (problem) |pr| {
+        sheet_error = pr;
+        return redrawAll();
+    }
+    if (sheetApp()) |found| startRemote(.apps, found[0].live, "");
+    closeSheet();
+}
+
 /// Projects' sidebar folded to a strip, as last left (`support_dir/sidebar`).
 var side_folded = false;
 
@@ -1681,8 +1844,8 @@ fn draw() void {
     if (open_sheet == .welcome) {
         welcome.draw(u, welcomeState(), theme, window) catch |e| return std.debug.print("desktop: welcome: {}\n", .{e});
     } else if (open_sheet != null) {
-        var fields: [1]sheet.Field = undefined;
-        sheet.draw(u, sheetState(&fields), theme, 0, window) catch |e| return std.debug.print("desktop: sheet: {}\n", .{e});
+        var fields: [2]sheet.Field = undefined;
+        sheet.draw(u, sheetState(&fields), theme, sheet_focus, window) catch |e| return std.debug.print("desktop: sheet: {}\n", .{e});
     }
     surface.configure(w, h);
     const frame = surface.acquire() orelse return;
@@ -1747,10 +1910,68 @@ fn openNewSite() void {
     const on_cloud = view == .cloud or view == .space;
     new_where = if (cloudOffered() and on_cloud) .cloud else .local;
     name_field.set("");
+    slug_field.set("");
+    slug_edited = false;
+    sheet_focus = 0;
+    const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+    var random: [6]u8 = undefined;
+    io.random(&random);
+    for (&new_suffix, random) |*c, b| c.* = alphabet[b % alphabet.len];
     sheet_error = null;
     sheet_busy = null;
     window.setTextInput(true);
     redrawAll();
+}
+
+/// The core's rules for an address made from a name: a marked letter is its plain one (ż is
+/// z), an apostrophe joins its word, anything else not a-z or 0-9 is one hyphen, none at the
+/// ends.
+fn slugify(buf: []u8, name: []const u8) []const u8 {
+    var n: usize = 0;
+    var dash = false;
+    var utf8 = std.unicode.Utf8View.init(name) catch return "";
+    var it = utf8.iterator();
+    while (it.nextCodepoint()) |cp| {
+        const plain: ?u8 = switch (cp) {
+            'a'...'z', '0'...'9' => @intCast(cp),
+            'A'...'Z' => @intCast(cp + 32),
+            'ą', 'Ą', 'á', 'à', 'ä', 'â', 'ã', 'å' => 'a',
+            'ć', 'Ć', 'ç', 'č' => 'c',
+            'ę', 'Ę', 'é', 'è', 'ë', 'ê', 'ě' => 'e',
+            'ł', 'Ł' => 'l',
+            'ń', 'Ń', 'ñ', 'ň' => 'n',
+            'ó', 'Ó', 'ö', 'ô', 'ò', 'õ', 'ø' => 'o',
+            'ś', 'Ś', 'š' => 's',
+            'ź', 'Ź', 'ż', 'Ż', 'ž' => 'z',
+            'í', 'ì', 'ï', 'î' => 'i',
+            'ú', 'ù', 'ü', 'û', 'ů' => 'u',
+            'ý', 'ÿ' => 'y',
+            'ř' => 'r',
+            'ť' => 't',
+            'ď' => 'd',
+            '\'', '\u{2019}' => continue,
+            else => null,
+        };
+        if (plain) |c| {
+            if (dash and n > 0 and n < buf.len) {
+                buf[n] = '-';
+                n += 1;
+            }
+            dash = false;
+            if (n < buf.len) {
+                buf[n] = c;
+                n += 1;
+            }
+        } else dash = true;
+    }
+    return buf[0..n];
+}
+
+/// New project's address: as typed, or made from the name.
+fn newSlug(buf: []u8) []const u8 {
+    const typed = std.mem.trim(u8, slug_field.value(), " ");
+    if (typed.len > 0) return typed;
+    return slugify(buf, name_field.value());
 }
 
 /// The first time Desktop opens on a Mac with nothing set (no projects, no default account
@@ -1879,7 +2100,7 @@ fn openAdminSheet() void {
     redrawAll();
 }
 
-fn adminState(fields: *[1]sheet.Field) sheet.State {
+fn adminState(fields: *[2]sheet.Field) sheet.State {
     const size = window.size();
     const problem = adminProblem(admin_field.value());
     fields[0] = .{
@@ -1947,9 +2168,11 @@ fn adminProblem(email: []const u8) ?[]const u8 {
     return null;
 }
 
-fn sheetState(fields: *[1]sheet.Field) sheet.State {
+fn sheetState(fields: *[2]sheet.Field) sheet.State {
     if (open_sheet == .admin) return adminState(fields);
     if (open_sheet == .language) return languageState();
+    if (open_sheet == .edit_app) return editAppState(fields);
+    if (open_sheet == .remove_app) return removeAppState();
     if (open_sheet == .deploy) return deployState(fields);
     if (open_sheet == .deployed) return deployedState();
     var state = if (new_where == .cloud and cloudOffered()) projectState(fields) else localState(fields);
@@ -1972,32 +2195,38 @@ fn whereOptions() []const []const u8 {
     return &where_options;
 }
 
-fn localState(fields: *[1]sheet.Field) sheet.State {
+/// New project on this Mac: as the dashboard's, its address the folder's name.
+fn localState(fields: *[2]sheet.Field) sheet.State {
     const size = window.size();
-    const name = name_field.value();
-    const problem = nameProblem(name);
+    var buf: [64]u8 = undefined;
+    const slug = newSlug(&buf);
+    const named = std.mem.trim(u8, name_field.value(), " ").len > 0;
+    const problem = if (slug.len == 0) null else nameProblem(slug);
     fields[0] = .{
-        .label = translated("Name"),
+        .label = translated("Project name"),
         .field = &name_field,
-        .placeholder = "my-site",
         .note = if (sheet_error) |e| .{
             .text = e,
             .kind = .bad,
-        } else if (problem) |pr| (if (pr.len > 0) sheet.Note{
+        } else null,
+    };
+    fields[1] = .{
+        .label = translated("Address"),
+        .field = &slug_field,
+        .placeholder = translated("my-project"),
+        .note = if (problem) |pr| (if (pr.len > 0) sheet.Note{
             .text = pr,
             .kind = .bad,
-        } else sheet.Note{
-            .text = translated("Lowercase letters, numbers and dashes. It is also the folder's name."),
-        }) else sheet.Note{
-            .text = translated("Lowercase letters, numbers and dashes. It is also the folder's name."),
+        } else null) else .{
+            .text = translated("Also the folder\u{2019}s name. Made from the name when left empty."),
         },
     };
     return .{
         .title = translated("New project"),
-        .description = translated("A project on this Mac, with the starter page. Deploy it to Publr Cloud whenever you like."),
-        .fields = fields[0..1],
+        .description = translated("Give it a name. You can add apps once it\u{2019}s made."),
+        .fields = fields[0..2],
         .primary = translated("Create project"),
-        .primary_enabled = problem == null,
+        .primary_enabled = named and slug.len > 0 and problem == null,
         .busy = sheet_busy,
         .hover = sheet_hover,
         .window_width = @floatCast(size.w),
@@ -2007,7 +2236,7 @@ fn localState(fields: *[1]sheet.Field) sheet.State {
 
 fn sheetEvent(win: *native.Window, event: native.Event) void {
     if (open_sheet == .welcome) return welcomeEvent(win, event);
-    var fields: [1]sheet.Field = undefined;
+    var fields: [2]sheet.Field = undefined;
     switch (event) {
         .mouse_move => |m| {
             const h = sheet.hit(sheetState(&fields), u, m.x, m.y);
@@ -2025,6 +2254,10 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
             .primary => primaryAction(),
             .cancel => if (deploy_job == null) closeSheet(),
             .link => native.openInBrowser(accounts_docs),
+            .field => |i| if (open_sheet == .new_project or open_sheet == .edit_app) {
+                sheet_focus = i;
+                redrawAll();
+            },
             .option => |i| {
                 if (open_sheet == .language) {
                     language_pick = i;
@@ -2039,6 +2272,10 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
         .text_command => |c| switch (c) {
             .enter => primaryAction(),
             .escape => if (sheet_busy == null and deploy_job == null) closeSheet(),
+            .tab, .backtab => if (open_sheet == .new_project or open_sheet == .edit_app) {
+                sheet_focus = 1 - sheet_focus;
+                redrawAll();
+            },
             else => if (sheetTypes() and sheetField().handle(event)) fieldChanged(),
         },
         .text => if (sheetTypes() and sheetField().handle(event)) fieldChanged(),
@@ -2049,16 +2286,27 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
 fn sheetField() *ui.TextField {
     if (open_sheet == .deploy) return &address_field;
     if (open_sheet == .admin) return &admin_field;
+    if (open_sheet == .new_project and sheet_focus == 1) return &slug_field;
+    if (open_sheet == .edit_app) return if (sheet_focus == 1) &app_path_field else &app_label_field;
     return &name_field;
 }
 
 /// The sheet takes typing (the deployed and welcome sheets have no field).
 fn sheetTypes() bool {
-    return open_sheet != .deployed and open_sheet != .welcome and open_sheet != .language and sheet_busy == null and deploy_job == null;
+    return open_sheet != .deployed and open_sheet != .welcome and open_sheet != .language and open_sheet != .remove_app and sheet_busy == null and deploy_job == null;
 }
 
 fn fieldChanged() void {
     sheet_error = null;
+    // The address follows the name until it is typed in.
+    if (open_sheet == .new_project) {
+        if (sheet_focus == 1) {
+            slug_edited = true;
+        } else if (!slug_edited) {
+            var buf: [64]u8 = undefined;
+            slug_field.set(slugify(&buf, name_field.value()));
+        }
+    }
     if (open_sheet == .deploy) {
         availability = null;
         address_changed_at = nowMs();
@@ -2071,6 +2319,8 @@ fn primaryAction() void {
         .new_project => if (new_where == .cloud and cloudOffered()) createProject() else createSite(),
         .admin => saveAdmin(),
         .language => saveLanguage(),
+        .edit_app => saveApp(),
+        .remove_app => removeApp(),
         // The welcome stays until the browser answers: signed in closes it, a no is said on it.
         .welcome => if (cloud.status == .signed_out) {
             cloud.signIn();
@@ -2141,7 +2391,7 @@ fn addressAnswered(slug: []const u8, answer: @import("cloud.zig").Availability) 
     redrawAll();
 }
 
-fn deployState(fields: *[1]sheet.Field) sheet.State {
+fn deployState(fields: *[2]sheet.Field) sheet.State {
     const size = window.size();
     var db: [128]u8 = undefined;
     const domain = cloud.projectDomain(&db);
@@ -2332,12 +2582,14 @@ fn deployedState() sheet.State {
 }
 
 fn createSite() void {
-    if (sheet_busy != null or nameProblem(name_field.value()) != null) return;
+    var buf: [64]u8 = undefined;
+    const slug = newSlug(&buf);
+    if (sheet_busy != null or slug.len == 0 or nameProblem(slug) != null) return;
     // The default account email from Settings; none leaves the admin to the site's setup page.
     loadSavedAdmin();
     const job = gpa.create(NewSite) catch return;
     job.* = .{
-        .name = gpa.dupe(u8, name_field.value()) catch return,
+        .name = gpa.dupe(u8, slug) catch return,
         .admin = gpa.dupe(u8, defaultAccount()) catch return,
     };
     sheet_busy = translated("Making the site…");
@@ -2355,32 +2607,36 @@ fn projectNameProblem(name: []const u8) ?[]const u8 {
     return null;
 }
 
-fn projectState(fields: *[1]sheet.Field) sheet.State {
+/// New project on Cloud: the dashboard's, a name and an address with six characters after.
+fn projectState(fields: *[2]sheet.Field) sheet.State {
     const size = window.size();
     const a = frame_arena.allocator();
-    const space = cloud.spaces[targetSpace()].name;
     const problem = projectNameProblem(name_field.value());
-    const usual: sheet.Note = .{
-        .text = translated("Its address is made from the name, with six random characters."),
-    };
+    var db: [256]u8 = undefined;
     fields[0] = .{
-        .label = translated("Name"),
+        .label = translated("Project name"),
         .field = &name_field,
-        .placeholder = translated("My project"),
         .note = if (sheet_error) |e| .{
             .text = e,
             .kind = .bad,
         } else if (problem) |pr| (if (pr.len > 0) sheet.Note{
             .text = pr,
             .kind = .bad,
-        } else usual) else usual,
+        } else null) else null,
+    };
+    fields[1] = .{
+        .label = translated("Address"),
+        .field = &slug_field,
+        .placeholder = translated("my-project"),
+        .suffix = std.fmt.allocPrint(a, "-{s}.{s}", .{ &new_suffix, cloud.projectDomain(&db) }) catch "",
+        .note = .{
+            .text = translated("The six characters at the end keep every address unique. Made from the name when left empty."),
+        },
     };
     return .{
         .title = translated("New project"),
-        .description = filled(a, translated("A project on Publr Cloud, in {space}, with the starter page."), .{
-            .space = space,
-        }) catch "",
-        .fields = fields[0..1],
+        .description = translated("Give it a name. You can add apps once it\u{2019}s made."),
+        .fields = fields[0..2],
         .primary = translated("Create project"),
         .primary_enabled = problem == null,
         .busy = sheet_busy,
@@ -2396,7 +2652,7 @@ fn createProject() void {
     const i = targetSpace();
     sheet_busy = translated("Making the project…");
     redrawAll();
-    cloud.createProject(cloud.spaces[i].slug, std.mem.trim(u8, name_field.value(), " "), projectMade);
+    cloud.createProject(cloud.spaces[i].slug, std.mem.trim(u8, name_field.value(), " "), std.mem.trim(u8, slug_field.value(), " "), &new_suffix, projectMade);
 }
 
 fn projectMade(made: @import("cloud.zig").Made) void {
@@ -2563,6 +2819,8 @@ fn clickProject(i: usize, target: project.Target) void {
         },
         .open_browser => openInBrowser(t),
         .fold => foldSidebar(!side_folded),
+        .edit_app => |k| openAppSheet(i, k, .edit_app),
+        .remove_app => |k| openAppSheet(i, k, .remove_app),
         .back => t.web.goBack(),
         .forward => t.web.goForward(),
         .reload => t.web.reload(),
@@ -3061,6 +3319,7 @@ test {
     _ = sites_module;
     _ = settings;
     _ = i18n;
+    _ = apps_edit;
 }
 
 // Settings: where sites live, the command in Terminal, and the build every project runs.
