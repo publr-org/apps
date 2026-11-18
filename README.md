@@ -11,6 +11,9 @@ zig build app -Doptimize=safe && ditto "zig-out/Publr Desktop.app" "/Application
                       Desktop in Applications, to open like any other app (ReleaseSafe:
                       std.http.Client breaks under ReleaseFast in Zig 0.16)
 zig build test        unit tests
+scripts/dmg.sh        dist/Publr-Desktop-<version>-macos-<cpu>.dmg: built, signed with the Developer ID,
+                      notarised, with SHA256SUMS signed by the release key (what updates check)
+                      (the version is build.zig.zon's; --local: ad-hoc signed, to check the window)
 ```
 
 Keys: Command-T Home, Command-, Settings, Command-W close the tab, Command-1..9 a tab,

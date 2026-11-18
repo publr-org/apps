@@ -50,6 +50,11 @@ pub const State = struct {
     project_language: []const u8,
     /// The AI tools, one row each.
     tools: []const ai_tools.Row,
+    /// This Desktop's version ("0.1.0"), how its updates stand, and the button beside them
+    /// ("Restart to update"; empty for none).
+    version: []const u8,
+    update_line: []const u8,
+    update_button: []const u8,
     /// Advanced is unfolded.
     advanced: bool,
     /// How far the page is scrolled, under its bar.
@@ -70,6 +75,7 @@ pub const Target = union(enum) {
     change_app_language,
     change_project_language,
     connect_tool: ai_tools.Tool,
+    update,
     advanced,
     choose_publr,
     clear_publr,
@@ -164,12 +170,32 @@ fn toolButton(s: State, u: *ui.Ui, i: usize) ?ui.Rect {
     return rowButton(u, toolRow(s, u, i), label);
 }
 
+fn updatesTitle(s: State, u: *ui.Ui) f32 {
+    return toolRow(s, u, s.tools.len).y + section_gap - 6;
+}
+
+/// Desktop's version and how its updates stand, the button at the right end.
+fn updatesRow(s: State, u: *ui.Ui) ui.Rect {
+    const c = column(s);
+    return .{
+        .x = c.x,
+        .y = updatesTitle(s, u) + title_step,
+        .w = c.w,
+        .h = tool_row_height,
+    };
+}
+
+fn updateButton(s: State, u: *ui.Ui) ?ui.Rect {
+    if (s.update_button.len == 0) return null;
+    return rowButton(u, updatesRow(s, u), s.update_button);
+}
+
 fn advancedRect(s: State, u: *ui.Ui) ui.Rect {
-    const last = toolRow(s, u, s.tools.len);
+    const last = updatesRow(s, u);
     const c = column(s);
     return .{
         .x = c.x - 8,
-        .y = last.y + section_gap - 6,
+        .y = last.y + last.h + section_gap - 6,
         .w = c.w + 16,
         .h = 32,
     };
@@ -281,6 +307,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (rowButton(u, appLanguageRow(s, u), changeLabel()).contains(x, y)) return .change_app_language;
     if (rowButton(u, projectLanguageRow(s, u), changeLabel()).contains(x, y)) return .change_project_language;
     for (s.tools, 0..) |tool, i| if (toolButton(s, u, i)) |b| if (b.contains(x, y)) return .{ .connect_tool = tool.tool };
+    if (updateButton(s, u)) |b| if (b.contains(x, y)) return .update;
     if (advancedRect(s, u).contains(x, y)) return .advanced;
     if (!s.advanced) return .none;
     if (chooseRect(s, u).contains(x, y)) return .choose_publr;
@@ -289,6 +316,13 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
 }
 
 // Drawing.
+
+/// Scrolled so Updates is at the top, or as far as the page goes.
+pub fn updatesScroll(s: State, u: *ui.Ui) f32 {
+    var top = s;
+    top.scroll = 0;
+    return @min(maxScroll(top, u), @max(0, updatesTitle(top, u) - top.top - header_height - pad));
+}
 
 /// How far the page scrolls: its last part (Advanced, or what it unfolds) in view.
 pub fn maxScroll(s: State, u: *ui.Ui) f32 {
@@ -380,6 +414,10 @@ fn drawPage(u: *ui.Ui, s: State, t: *const Theme) !void {
     });
     for (s.tools, 0..) |tool, i| try drawTool(u, s, t, i, tool);
 
+    // Updates.
+    try sectionTitle(u, t, c, updatesTitle(s, u), translated("Updates"));
+    try drawUpdates(u, s, t);
+
     // Advanced, folded.
     const a = advancedRect(s, u);
     if (same(s.hover, .advanced)) try u.rect(a, t.hover, 8);
@@ -444,6 +482,34 @@ fn drawPage(u: *ui.Ui, s: State, t: *const Theme) !void {
     });
     try button(u, t, chooseRect(s, u), chooseLabel(), same(s.hover, .choose_publr), true);
     if (s.publr != null) try button(u, t, clearRect(s, u), clearLabel(), same(s.hover, .clear_publr), true);
+}
+
+/// "Publr Desktop 0.1.0", how its updates stand under it, and the button when there is one.
+fn drawUpdates(u: *ui.Ui, s: State, t: *const Theme) !void {
+    const r = updatesRow(s, u);
+    const room: f32 = if (updateButton(s, u)) |b| b.w + 24 else 0;
+    var buffer: [64]u8 = undefined;
+    const name = std.fmt.bufPrint(&buffer, "Publr Desktop {s}", .{s.version}) catch "Publr Desktop";
+    try u.text(.{
+        .x = r.x,
+        .y = r.y + 8,
+        .w = r.w - room,
+        .h = 18,
+    }, name, .{
+        .size = 14,
+        .weight = 500,
+        .color = t.text,
+    });
+    try u.text(.{
+        .x = r.x,
+        .y = r.y + 27,
+        .w = r.w - room,
+        .h = 16,
+    }, s.update_line, .{
+        .size = 12,
+        .color = t.text2,
+    });
+    if (updateButton(s, u)) |b| try button(u, t, b, s.update_button, same(s.hover, .update), true);
 }
 
 /// A tool: its name, how it stands, and Connect (or a tick once it is connected).

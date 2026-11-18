@@ -50,10 +50,12 @@ pub fn build(b: *std.Build) void {
         }),
     });
     add_languages(b, exe.root_module, target, optimize);
+    add_build_info(b, exe.root_module);
     b.installArtifact(exe);
     // Beside Desktop in zig-out/bin too, so `zig build run` finds it as the app does.
     b.installArtifact(cli.artifact("publr"));
     const app = native_build.addAppBundle(b, exe, "Publr Desktop", "app.publr.desktop", .{
+        .version = @import("build.zig.zon").version,
         .icon = b.path("assets/AppIcon.icns"),
     });
     const bundled = b.addInstallArtifact(cli.artifact("publr"), .{
@@ -93,6 +95,13 @@ pub fn build(b: *std.Build) void {
     b.step("run", "Open Publr Desktop").dependOn(&run.step);
 
     add_web(b, optimize);
+}
+
+/// `build_info.version`: build.zig.zon's, the version Desktop says it is and updates from.
+fn add_build_info(b: *std.Build, module: *std.Build.Module) void {
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", @import("build.zig.zon").version);
+    module.addOptions("build_info", options);
 }
 
 /// Desktop's words in other languages: Publr's own catalogue (PO files, plural rules), and
@@ -158,6 +167,7 @@ fn add_web(b: *std.Build, optimize: std.builtin.Optimize) void {
         }),
     });
     add_languages(b, wasm.root_module, target, optimize);
+    add_build_info(b, wasm.root_module);
     // The page calls the backend's `desktop_*` functions.
     wasm.rdynamic = true;
     const install = b.addInstallArtifact(wasm, .{

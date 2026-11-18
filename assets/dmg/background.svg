@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 400" width="660" height="400">
+  <!-- The DMG window's background: Publr Desktop at x 180, Applications at x 480, both at y 190. -->
+  <defs>
+    <radialGradient id="glow" cx="0.5" cy="0.38" r="0.75">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#ececee"/>
+    </radialGradient>
+  </defs>
+  <rect width="660" height="400" fill="url(#glow)"/>
+  <g fill="none" stroke="#b9b9bf" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M296 190 H364"/>
+    <path d="M346 172 L366 190 L346 208"/>
+  </g>
+  <text x="330" y="338" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif" font-size="13" fill="#8a8a90">Drag Publr Desktop to Applications</text>
+</svg>

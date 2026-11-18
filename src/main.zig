@@ -29,6 +29,7 @@ const translated_count = i18n.translated_count;
 const fill = i18n.fill;
 const Cloud = @import("cloud.zig").Cloud;
 const deploying = @import("deploy.zig");
+const updating = @import("update.zig");
 
 const Io = std.Io;
 
@@ -42,6 +43,7 @@ const Tag = struct {
     const close_tab = 4;
     const refresh_sites = 5;
     const settings = 6;
+    const updates = 7;
     /// Command-1 to Command-9.
     const tab = 10;
 };
@@ -143,6 +145,9 @@ var view: home.View = .all;
 var layout: home.Layout = .grid;
 var scroll: f32 = 0;
 var cloud: Cloud = undefined;
+var updater: updating.Updater = undefined;
+/// `updater` is set up (the menus are built once before it is).
+var updater_ready = false;
 /// The open menu: whose, and where it shows.
 var menu: ?struct {
     of: union(enum) {
@@ -320,6 +325,17 @@ pub fn main(init: std.process.Init) !void {
     cloud = .init(gpa, io, env.get("DESKTOP_CLOUD") orelse "https://cloud.publr.app", cloudChanged);
     cloud.no_browser = env.get("DESKTOP_NO_BROWSER") != null;
     cloud.refresh();
+    updater = .{
+        .gpa = gpa,
+        .io = io,
+        .env = env,
+        .changed = updaterChanged,
+    };
+    updater.init();
+    updater_ready = true;
+    // The app menu again, now that it knows whether this build takes updates.
+    buildMenus();
+    updater.check();
     syncing.init(.{
         .gpa = gpa,
         .io = io,
@@ -441,13 +457,27 @@ fn themeFor(a: native.Appearance) *const themes.Theme {
 fn buildMenus() void {
     // Titles in the person's language, made again when it changes (the menus copy them).
     var names: [5][128]u8 = undefined;
-    native.setAppMenuItems(&.{
-        .{
-            .title = menuTitle(&names[0], translated("Settings…")),
-            .key = ",",
-            .tag = Tag.settings,
-        },
-    });
+    const settings_item: native.MenuItem = .{
+        .title = menuTitle(&names[0], translated("Settings…")),
+        .key = ",",
+        .tag = Tag.settings,
+    };
+    // Check for Updates… under About, as macOS apps put it (Restart to Update once one is
+    // in place); a build from source takes none.
+    if (updater_ready and updater.enabled()) {
+        native.setAppMenuItems(&.{
+            .{
+                .title = menuTitle(&names[1], if (updater.state == .ready) translated("Restart to Update") else translated("Check for Updates…")),
+                .tag = Tag.updates,
+            },
+            .{
+                .separator = true,
+            },
+            settings_item,
+        });
+    } else {
+        native.setAppMenuItems(&.{settings_item});
+    }
     native.setMenu("File", &.{
         .{
             .title = menuTitle(&names[0], translated("Home")),
@@ -3186,6 +3216,13 @@ fn onMenu(_: ?*anyopaque, tag: u32) void {
         Tag.close_tab => if (active) |i| closeTab(i) else window.close(),
         Tag.refresh_sites => refreshAll(),
         Tag.settings => openSettings(),
+        Tag.updates => {
+            if (updater.state == .ready) return updater.restart();
+            updater.check();
+            openSettings();
+            scroll = settings.updatesScroll(settingsState(), u);
+            redrawAll();
+        },
         else => if (tag >= Tag.tab and tag < Tag.tab + 9) showTab(tag - Tag.tab),
     }
 }
@@ -3479,6 +3516,9 @@ fn settingsState() settings.State {
         .app_language = app_language.label(),
         .project_language = projectLanguageLabel(settings_language),
         .tools = tools.rows(&tool_rows),
+        .version = updating.version,
+        .update_line = updateLine(),
+        .update_button = updateButton(),
         .advanced = settings_advanced,
         .scroll = scroll,
         .busy = settings_busy,
@@ -3490,6 +3530,49 @@ fn settingsState() settings.State {
     };
 }
 
+var update_line_buffer: [256]u8 = undefined;
+
+/// How Desktop's updates stand, in Settings.
+fn updateLine() []const u8 {
+    if (!updater.enabled()) return translated("Built from source: no updates.");
+    const buffer = &update_line_buffer;
+    return switch (updater.state) {
+        .idle => "",
+        .checking => translated("Checking for updates…"),
+        .up_to_date => translated("Up to date."),
+        .downloading => fill(buffer, translated("Downloading {version}…"), .{ .version = updater.newer }),
+        .ready => fill(buffer, translated("{version} is ready. Restart Publr Desktop to use it."), .{ .version = updater.newer }),
+        .available => fill(buffer, translated("{version} is out. Download it, then replace this app with it."), .{ .version = updater.newer }),
+        .failed => translated("Couldn’t check for updates. Check your connection, then try again."),
+    };
+}
+
+fn updateButton() []const u8 {
+    if (!updater.enabled()) return "";
+    return switch (updater.state) {
+        .checking, .downloading => "",
+        .ready => translated("Restart to update"),
+        .available => translated("Download"),
+        else => translated("Check for updates"),
+    };
+}
+
+fn updaterChanged() void {
+    buildMenus();
+    redrawAll();
+}
+
+fn clickUpdate() void {
+    switch (updater.state) {
+        .ready => updater.restart(),
+        .available => {
+            var buffer: [512]u8 = undefined;
+            native.openInBrowser(std.fmt.bufPrintSentinel(&buffer, "{s}", .{updater.page()}, 0) catch return);
+        },
+        else => updater.check(),
+    }
+}
+
 fn clickSettings(t: settings.Target) void {
     switch (t) {
         .change_folder => chooseFolder(.default),
@@ -3497,6 +3580,7 @@ fn clickSettings(t: settings.Target) void {
         .change_app_language => openLanguageSheet(.app),
         .change_project_language => openLanguageSheet(.projects),
         .connect_tool => |tool| tools.connect(tool),
+        .update => clickUpdate(),
         .add_folder => chooseFolder(.add),
         .remove_folder => |i| removeFolder(i),
         .advanced => {

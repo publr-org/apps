@@ -954,7 +954,6 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
     });
     for (1..s.apps.len + 1) |k| try sideCard(u, s, t, k);
     try u.endClip();
-
 }
 
 /// A sidebar button's ground: chosen, pointed at, or (folded, where only icons show) faint,

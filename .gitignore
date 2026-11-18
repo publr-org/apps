@@ -6,3 +6,4 @@ zig-pkg/
 # A site the publr command makes when run in this folder by mistake.
 data/
 src/data/
+dist/
