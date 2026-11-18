@@ -127,6 +127,25 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(demo);
     const run = b.addRunArtifact(demo);
     b.step("demo", "Run the demo window").dependOn(&run.step);
+
+    // `zig build webgpu -- <address>`: whether the web view gets WebGPU (examples/webgpu.html).
+    const webgpu = b.addExecutable(.{
+        .name = "webgpu-check",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/webgpu.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{
+                    .name = "native",
+                    .module = native,
+                },
+            },
+        }),
+    });
+    const run_webgpu = b.addRunArtifact(webgpu);
+    run_webgpu.addPassthruArgs();
+    b.step("webgpu", "Whether the web view gets WebGPU").dependOn(&run_webgpu.step);
 }
 
 /// The `native` and `ui` modules for a browser page.
