@@ -1,6 +1,6 @@
 .{
     .name = .publr_desktop,
-    .version = "0.1.0",
+    .version = "0.1.1",
     .fingerprint = 0xc54d70692203a93,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
