@@ -1,7 +1,7 @@
 # Publr Desktop
 
-The desktop app for Publr sites (`../.agents/specs/publr-desktop.md`). One window, a tab per
-open site: the bar and Home are drawn by Desktop itself on the GPU (`native`'s `ui`), each
+The desktop app for Publr sites (`../../.agents/specs/publr-desktop.md`). One window, a tab per
+open site: the bar and Home are drawn by Desktop itself on the GPU (`platform`'s `ui`), each
 tab is the site's admin, signed in, in the system's web view.
 
 ```
@@ -11,15 +11,22 @@ zig build app -Doptimize=safe && ditto "zig-out/Publr Desktop.app" "/Application
                       Desktop in Applications, to open like any other app (ReleaseSafe:
                       std.http.Client breaks under ReleaseFast in Zig 0.16)
 zig build test        unit tests
-scripts/dmg.sh        dist/Publr-Desktop-<version>-macos-<cpu>.dmg: built, signed with the Developer ID,
+packaging/macos/dmg.sh
+                      dist/Publr-Desktop-<version>-macos-<cpu>.dmg: built, signed with the Developer ID,
                       notarised, with SHA256SUMS signed by the release key (what updates check)
                       (the version is build.zig.zon's; --local: ad-hoc signed, to check the window)
 ```
 
-Keys: Command-T Home, Command-, Settings, Command-W close the tab, Command-1..9 a tab,
-Command-R reload, Command-Shift-B the page in your browser.
+Releases: Actions › Desktop release › Run (`../.github/workflows/desktop-release.yml`), choosing
+patch, minor or major. Every platform is built, signed and tested, then tagged
+`desktop-v<version>` and released with one signed `SHA256SUMS` over the files, which
+Desktop's updates read (`src/update.zig`). Each platform packages itself under `packaging/`.
 
-The sites are the `publr` command's (`../cli`, linked as the `publr_cli` module): every
+Keys: Command-T Home, Command-, Settings, Command-W close the tab, Command-1..9 a tab,
+Command-R reload, Command-Shift-B the page in your browser. Command-click on a project, an
+app, View site or Open admin opens it in your browser instead of a tab.
+
+The sites are the `publr` command's (`../../cli`, linked as the `publr_cli` module): every
 listed folder's sites (`~/Publr` and whatever `publr config` or Settings add), grouped by
 folder on Home. Desktop starts, stops and removes them, makes new ones and signs into their
 admins through the same core; the first run takes over `~/publr-sites` as the command does.
@@ -35,7 +42,7 @@ that folder added to `~/.zshrc` or `~/.bashrc` once; a `publr` file already ther
 
 Languages: every word a person sees is marked as Publr marks its own (`translated("…")`,
 `translated_count`, `translated_in`; `src/i18n.zig`), and each language is a PO file,
-`i18n/<code>.po`, read with Publr's catalogue. `zig run ../publr/scripts/i18n.zig -- src`
+`i18n/<code>.po`, read with Publr's catalogue. `zig run ../../publr/scripts/i18n.zig -- src`
 writes the template for translators. Settings › Language: Desktop's own (the Mac's by
 default) and the one new projects start in (`publr config language`).
 

@@ -1,23 +1,33 @@
 #!/bin/sh
-# Publr Desktop's installer: builds the app, signs it with the Developer ID, lays it out in
-# a disk image (the app, an arrow, Applications) and has Apple notarise it.
+# Publr Desktop's installer for macOS: builds the app, signs it with the Developer ID, lays it
+# out in a disk image (the app, an arrow, Applications) and has Apple notarise it.
 #
-#   scripts/dmg.sh                 signed, notarised: dist/Publr-Desktop-<version>-macos-<cpu>.dmg,
-#                                  with SHA256SUMS and SHA256SUMS.sig, a release as Desktop's
-#                                  updates take it (src/update.zig)
-#   scripts/dmg.sh --local         ad-hoc signed, not notarised, to check the window
+#   packaging/macos/dmg.sh             signed, notarised: dist/Publr-Desktop-<version>-macos-<cpu>.dmg,
+#                                      with SHA256SUMS and SHA256SUMS.sig over it
+#   packaging/macos/dmg.sh --no-sums   the disk image alone (a release signs one SHA256SUMS
+#                                      over every platform's file: desktop-release.yml)
+#   packaging/macos/dmg.sh --local     ad-hoc signed, not notarised, to check the window
 #
-# Needs a "Developer ID Application" certificate in the keychain and the notary login saved
-# once as "publr-notary" (xcrun notarytool store-credentials publr-notary ...).
-# PUBLR_SIGN_IDENTITY and PUBLR_NOTARY_PROFILE pick others. The checksums are signed with
-# Publr's release key (~/.publr/release-signing-key.pem, or PUBLR_SIGNING_KEY_FILE) by
-# OpenSSL 3 (Homebrew's; the system's LibreSSL cannot).
+# Needs a "Developer ID Application" certificate in the keychain (PUBLR_SIGN_IDENTITY picks
+# one) and a notary login: an App Store Connect API key (PUBLR_NOTARY_KEY, the .p8 file, with
+# PUBLR_NOTARY_KEY_ID and PUBLR_NOTARY_ISSUER), or one saved once as "publr-notary"
+# (xcrun notarytool store-credentials publr-notary ...; PUBLR_NOTARY_PROFILE picks another).
+# The checksums are signed with Publr's release key (~/.publr/release-signing-key.pem, or
+# PUBLR_SIGNING_KEY_FILE) by OpenSSL 3 (Homebrew's; the system's LibreSSL cannot).
+# PUBLR_TOOLCHAIN_ARCHIVE is the compiler the carried `publr` command takes, built before.
 set -eu
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 LOCAL=0
-[ "${1:-}" = "--local" ] && LOCAL=1
+SUMS=1
+for arg in "$@"; do
+    case "$arg" in
+        --local) LOCAL=1; SUMS=0 ;;
+        --no-sums) SUMS=0 ;;
+        *) echo "Unknown option: $arg" >&2; exit 1 ;;
+    esac
+done
 
 NAME="Publr Desktop"
 PROFILE="${PUBLR_NOTARY_PROFILE:-publr-notary}"
@@ -28,6 +38,11 @@ case "$(uname -m)" in
 esac
 DMG="dist/Publr-Desktop-$VERSION-macos-$CPU.dmg"
 KEY="${PUBLR_SIGNING_KEY_FILE:-$HOME/.publr/release-signing-key.pem}"
+if [ -n "${PUBLR_NOTARY_KEY:-}" ]; then
+    set -- --key "$PUBLR_NOTARY_KEY" --key-id "${PUBLR_NOTARY_KEY_ID:?}" --issuer "${PUBLR_NOTARY_ISSUER:?}"
+else
+    set -- --keychain-profile "$PROFILE"
+fi
 
 if [ "$LOCAL" = 1 ]; then
     IDENTITY="-"
@@ -39,6 +54,13 @@ else
         echo "Make one in Xcode: Settings > Accounts > Manage Certificates > + > Developer ID Application." >&2
         exit 1
     fi
+    if ! xcrun notarytool history "$@" >/dev/null 2>&1; then
+        echo "No notary login: set PUBLR_NOTARY_KEY, PUBLR_NOTARY_KEY_ID and PUBLR_NOTARY_ISSUER, or save one with:" >&2
+        echo "  xcrun notarytool store-credentials $PROFILE --apple-id <apple id> --team-id <team id> --password <app-specific password>" >&2
+        exit 1
+    fi
+fi
+if [ "$SUMS" = 1 ]; then
     if [ ! -f "$KEY" ]; then
         echo "No release signing key at $KEY." >&2
         exit 1
@@ -47,15 +69,14 @@ else
         echo "The checksums need OpenSSL 3 (brew install openssl), not $(openssl version)." >&2
         exit 1
     fi
-    if ! xcrun notarytool history --keychain-profile "$PROFILE" >/dev/null 2>&1; then
-        echo "No notary login saved as \"$PROFILE\". Save it once with:" >&2
-        echo "  xcrun notarytool store-credentials $PROFILE --apple-id <apple id> --team-id <team id> --password <app-specific password>" >&2
-        exit 1
-    fi
 fi
 
 echo "==> Building $NAME $VERSION"
-zig build app -Doptimize=safe
+if [ -n "${PUBLR_TOOLCHAIN_ARCHIVE:-}" ]; then
+    zig build app -Doptimize=safe -Dtoolchain-archive="$PUBLR_TOOLCHAIN_ARCHIVE"
+else
+    zig build app -Doptimize=safe
+fi
 
 echo "==> Signing with: $IDENTITY"
 rm -rf dist
@@ -73,7 +94,7 @@ if [ -e "/Volumes/$NAME" ]; then
     exit 1
 fi
 ln -s /Applications dist/stage/Applications
-tiffutil -cathidpicheck assets/dmg/background.png assets/dmg/background@2x.png \
+tiffutil -cathidpicheck packaging/macos/background.png packaging/macos/background@2x.png \
     -out dist/stage/.background/background.tiff 2>/dev/null
 
 hdiutil create -quiet -volname "$NAME" -srcfolder dist/stage -fs HFS+ -format UDRW \
@@ -122,11 +143,16 @@ if [ "$LOCAL" = 1 ]; then
 fi
 
 echo "==> Notarising (a few minutes)"
-xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait
+xcrun notarytool submit "$DMG" "$@" --wait
 xcrun stapler staple "$DMG"
 spctl --assess --type open --context context:primary-signature -v "$DMG"
+
+if [ "$SUMS" = 0 ]; then
+    echo "==> $DMG"
+    exit 0
+fi
 
 echo "==> Signing the checksums"
 (cd dist && shasum -a 256 "$(basename "$DMG")" > SHA256SUMS &&
     openssl pkeyutl -sign -inkey "$KEY" -rawin -in SHA256SUMS -out SHA256SUMS.sig)
-echo "==> $DMG, SHA256SUMS and SHA256SUMS.sig are ready to hand out as release v$VERSION"
+echo "==> $DMG, SHA256SUMS and SHA256SUMS.sig are ready to hand out as release desktop-v$VERSION"

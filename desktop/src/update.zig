@@ -5,24 +5,30 @@
 //! Desktop carries on as it was; the next start is the new one, or now with Restart to
 //! update. Nothing here ever waits on the network on the main thread.
 //!
-//! A release is `Publr-Desktop-<version>-macos-<cpu>.dmg` with `SHA256SUMS` and
-//! `SHA256SUMS.sig` beside it (`scripts/dmg.sh`). Where releases are asked for and fetched
-//! from: `DESKTOP_RELEASES_LATEST` and `DESKTOP_RELEASES_URL` change it (for tests).
+//! A release is the apps repository's `desktop-v<version>` (the repository holds the other
+//! apps' releases too), with `Publr-Desktop-<version>-<os>-<cpu>.<ext>` for every platform
+//! and one `SHA256SUMS` and `SHA256SUMS.sig` over them (`.github/workflows/desktop-release.yml`).
+//! Where releases are listed and fetched from: `DESKTOP_RELEASES_LIST` and
+//! `DESKTOP_RELEASES_URL` change it (for tests).
 //!
 //! An app Desktop cannot replace (in a folder this account cannot write, run from the disk
 //! image, or moved aside by macOS) is told about the release and links to its download.
 
 const std = @import("std");
 const builtin = @import("builtin");
-const native = @import("native");
+const platform = @import("platform");
 const core = @import("publr_cli");
 const build_info = @import("build_info");
 
 pub const version = build_info.version;
-pub const repository = "publr-org/desktop";
-const latest_default = "https://api.github.com/repos/" ++ repository ++ "/releases/latest";
+pub const repository = "publr-org/apps";
+/// Desktop's releases among the repository's: `desktop-v0.2.0`.
+const tag_prefix = "desktop-v";
+/// The newest releases first; Desktop's newest is among them unless the other apps made
+/// a hundred releases since.
+const list_default = "https://api.github.com/repos/" ++ repository ++ "/releases?per_page=100";
 const downloads_default = "https://github.com/" ++ repository ++ "/releases/download";
-const page_default = "https://github.com/" ++ repository ++ "/releases/latest";
+const page_default = "https://github.com/" ++ repository ++ "/releases?q=" ++ tag_prefix;
 /// The Developer ID team Desktop is signed by; an update signed by any other is refused.
 const team = "8RHXG5NFYU";
 const app_name = "Publr Desktop.app";
@@ -80,7 +86,7 @@ pub const Updater = struct {
             else => {},
         }
         self.state = .checking;
-        native.spawn(Job.run, .{self}) catch {
+        platform.spawn(Job.run, .{self}) catch {
             self.state = .failed;
         };
     }
@@ -108,7 +114,7 @@ pub const Updater = struct {
             .stderr = .ignore,
             .pgid = 0,
         }) catch return;
-        native.quit();
+        platform.quit();
     }
 
     /// Where the release can be downloaded by hand.
@@ -141,7 +147,7 @@ const Done = struct {
             .updater = updater,
             .state = state,
         };
-        native.runOnMain(done, finish);
+        platform.runOnMain(done, finish);
     }
 
     fn finish(ctx: ?*anyopaque) callconv(.c) void {
@@ -168,7 +174,7 @@ fn take(self: *Updater, arena: std.mem.Allocator) !State {
     const base = self.env.get("DESKTOP_RELEASES_URL") orelse downloads_default;
     var files: [3][]const u8 = undefined;
     for ([_][]const u8{ name, "SHA256SUMS", "SHA256SUMS.sig" }, 0..) |file, i| {
-        const url = try std.fmt.allocPrint(arena, "{s}/v{s}/{s}", .{ base, newest, file });
+        const url = try std.fmt.allocPrint(arena, "{s}/" ++ tag_prefix ++ "{s}/{s}", .{ base, newest, file });
         var body: std.Io.Writer.Allocating = .init(arena);
         try core.versions.get(self.io, url, &body.writer);
         if (body.written().len > image_bytes_max) return error.TooBig;
@@ -183,19 +189,37 @@ fn take(self: *Updater, arena: std.mem.Allocator) !State {
     return .ready;
 }
 
-/// The newest release's version, from where releases are listed.
+/// The newest Desktop release's version, from where releases are listed: the highest
+/// `desktop-v<version>` that is neither a draft nor a pre-release.
 fn latest(self: *Updater, arena: std.mem.Allocator) ![]const u8 {
-    const url = self.env.get("DESKTOP_RELEASES_LATEST") orelse latest_default;
+    const url = self.env.get("DESKTOP_RELEASES_LIST") orelse list_default;
     var body: std.Io.Writer.Allocating = .init(arena);
     try core.versions.get(self.io, url, &body.writer);
-    const Latest = struct {
-        tag_name: []const u8,
-    };
-    const found = std.json.parseFromSliceLeaky(Latest, arena, body.written(), .{
+    return newestOf(arena, body.written()) orelse error.BadRelease;
+}
+
+const Release = struct {
+    tag_name: []const u8,
+    draft: bool = false,
+    prerelease: bool = false,
+};
+
+fn newestOf(arena: std.mem.Allocator, listed: []const u8) ?[]const u8 {
+    const releases = std.json.parseFromSliceLeaky([]const Release, arena, listed, .{
         .ignore_unknown_fields = true,
-    }) catch return error.BadRelease;
-    const tag = found.tag_name;
-    return if (tag.len > 0 and tag[0] == 'v') tag[1..] else tag;
+    }) catch return null;
+    var best: ?[]const u8 = null;
+    var best_version: std.SemanticVersion = undefined;
+    for (releases) |r| {
+        if (r.draft or r.prerelease or !std.mem.startsWith(u8, r.tag_name, tag_prefix)) continue;
+        const v = r.tag_name[tag_prefix.len..];
+        const parsed = std.SemanticVersion.parse(v) catch continue;
+        if (best == null or parsed.order(best_version) == .gt) {
+            best = v;
+            best_version = parsed;
+        }
+    }
+    return best;
 }
 
 /// The disk image's app laid beside this one, its signature checked, then swapped in: this
@@ -289,6 +313,18 @@ fn runChecked(io: std.Io, argv: []const []const u8) !void {
         .exited => |code| if (code != 0) return error.CommandFailed,
         else => return error.CommandFailed,
     }
+}
+
+test newestOf {
+    var arena: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena.deinit();
+    const listed =
+        \\[{"tag_name":"design-v0.9.0"},{"tag_name":"desktop-v0.3.0","draft":true},
+        \\ {"tag_name":"desktop-v0.2.1-beta","prerelease":true},{"tag_name":"desktop-v0.2.0"},
+        \\ {"tag_name":"desktop-v0.10.0"},{"tag_name":"desktop-vx"}]
+    ;
+    try std.testing.expectEqualStrings("0.10.0", newestOf(arena.allocator(), listed).?);
+    try std.testing.expect(newestOf(arena.allocator(), "[]") == null);
 }
 
 test sibling {

@@ -1,0 +1,222 @@
+name: Desktop release
+
+# Actions → Desktop release → Run, choosing patch, minor or major. The next version is built,
+# tested, signed and notarised on every platform first; only then is its commit tagged
+# `desktop-v<version>` and released, so a failed run leaves no tag or Release. The tag is
+# merged into main afterwards.
+#
+# A release holds `Publr-Desktop-<version>-<os>-<cpu>.<ext>` for each platform, one
+# `SHA256SUMS` over them all signed with Publr's release key (`SHA256SUMS.sig`, what
+# Desktop's updates check), and `workspace.txt`: the commit of each repo it was built from.
+# A platform is one row of the build matrix and its own script under desktop/packaging/.
+#
+# Secrets:
+#   MACOS_CERTIFICATE           the "Developer ID Application" certificate, a .p12 in base64
+#   MACOS_CERTIFICATE_PASSWORD  its password
+#   NOTARY_KEY                  an App Store Connect API key (the .p8 file's text)
+#   NOTARY_KEY_ID, NOTARY_ISSUER  its key id and issuer id
+#   PUBLR_RELEASE_SIGNING_KEY   Publr's release key (PEM), as Publr's own releases use
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: What kind of release
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+concurrency: desktop-release
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      icons: ${{ steps.commits.outputs.icons }}
+      cli: ${{ steps.commits.outputs.cli }}
+      publr: ${{ steps.commits.outputs.publr }}
+      design: ${{ steps.commits.outputs.design }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: apps, fetch-depth: 0 }
+
+      - name: The next version
+        id: next
+        working-directory: apps
+        env:
+          BUMP: "${{ inputs.bump }}"
+          SIGNING_KEY: "${{ secrets.PUBLR_RELEASE_SIGNING_KEY }}"
+          CERTIFICATE: "${{ secrets.MACOS_CERTIFICATE }}"
+          NOTARY_KEY: "${{ secrets.NOTARY_KEY }}"
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::release from main, not $GITHUB_REF"; exit 1
+          fi
+          for secret in SIGNING_KEY CERTIFICATE NOTARY_KEY; do
+            if [ -z "${!secret}" ]; then
+              echo "::error::a release needs every secret named at the top of this workflow; $secret is missing"; exit 1
+            fi
+          done
+          current="$(sed -nE 's/^ *\.version = "([0-9]+\.[0-9]+\.[0-9]+)",$/\1/p' desktop/build.zig.zon)"
+          IFS=. read -r major minor patch <<< "$current"
+          case "$BUMP" in
+            major) version="$((major + 1)).0.0" ;;
+            minor) version="$major.$((minor + 1)).0" ;;
+            *)     version="$major.$minor.$((patch + 1))" ;;
+          esac
+          if git ls-remote --exit-code --tags origin "desktop-v$version" >/dev/null; then
+            echo "::error::desktop-v$version already exists"; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing \`desktop-v$version\` ($BUMP from $current)" >> "$GITHUB_STEP_SUMMARY"
+
+      # Every platform builds from the same commits of the repos Desktop is built from.
+      - name: The commits it is built from
+        id: commits
+        run: |
+          for repo in icons cli publr design; do
+            echo "$repo=$(gh api "repos/publr-org/$repo/commits/main" --jq .sha)" >> "$GITHUB_OUTPUT"
+          done
+
+  build:
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - { runner: macos-latest, os: macos, cpu: aarch64 }
+          - { runner: macos-15-intel, os: macos, cpu: x86_64 }
+    runs-on: ${{ matrix.runner }}
+    env: { VERSION: "${{ needs.version.outputs.version }}" }
+    steps:
+      # The workspace's layout: the apps' paths (../../cli, ../../publr) find their siblings.
+      - uses: actions/checkout@v4
+        with: { path: apps }
+      - uses: actions/checkout@v4
+        with: { repository: publr-org/icons, ref: "${{ needs.version.outputs.icons }}", path: icons }
+      - uses: actions/checkout@v4
+        with: { repository: publr-org/cli, ref: "${{ needs.version.outputs.cli }}", path: cli }
+      - uses: actions/checkout@v4
+        with: { repository: publr-org/publr, ref: "${{ needs.version.outputs.publr }}", path: publr }
+      - uses: actions/checkout@v4
+        with: { repository: publr-org/design, ref: "${{ needs.version.outputs.design }}", path: publr-design }
+      # lib, Zig, and the compiler the carried `publr` command takes, cached per target.
+      - uses: publr-org/cli/.github/actions/toolchain@main
+
+      - name: Write the version
+        working-directory: apps/desktop
+        run: |
+          sed -i.bak -E "s/^( *\.version = \")[0-9]+\.[0-9]+\.[0-9]+(\",)$/\1$VERSION\2/" build.zig.zon
+          rm build.zig.zon.bak
+          grep -q "\"$VERSION\"" build.zig.zon
+
+      - name: zig build test
+        working-directory: apps/desktop
+        run: zig build test -Dtoolchain-archive="$PUBLR_TOOLCHAIN_ARCHIVE"
+
+      - name: The signing certificate, in a keychain of its own
+        if: matrix.os == 'macos'
+        env:
+          CERTIFICATE: "${{ secrets.MACOS_CERTIFICATE }}"
+          PASSWORD: "${{ secrets.MACOS_CERTIFICATE_PASSWORD }}"
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          secret="$(openssl rand -hex 16)"
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$secret" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$secret" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -P "$PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$secret" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/certificate.p12"
+
+      - name: The disk image, signed and notarised
+        if: matrix.os == 'macos'
+        working-directory: apps/desktop
+        env:
+          NOTARY_KEY: "${{ secrets.NOTARY_KEY }}"
+          PUBLR_NOTARY_KEY_ID: "${{ secrets.NOTARY_KEY_ID }}"
+          PUBLR_NOTARY_ISSUER: "${{ secrets.NOTARY_ISSUER }}"
+        run: |
+          export PUBLR_NOTARY_KEY="$RUNNER_TEMP/notary.p8"
+          printf '%s\n' "$NOTARY_KEY" > "$PUBLR_NOTARY_KEY"
+          packaging/macos/dmg.sh --no-sums
+          test -f "dist/Publr-Desktop-$VERSION-macos-${{ matrix.cpu }}.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}-${{ matrix.cpu }}
+          path: apps/desktop/dist/Publr-Desktop-*
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TAG: desktop-v${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: apps, fetch-depth: 0 }
+      - uses: actions/download-artifact@v4
+        with: { path: dist, pattern: "desktop-*", merge-multiple: true }
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          {
+            echo "apps ${{ github.sha }}"
+            echo "icons ${{ needs.version.outputs.icons }}"
+            echo "cli ${{ needs.version.outputs.cli }}"
+            echo "publr ${{ needs.version.outputs.publr }}"
+            echo "design ${{ needs.version.outputs.design }}"
+          } > workspace.txt
+          sha256sum Publr-Desktop-* workspace.txt > SHA256SUMS
+          cat SHA256SUMS
+
+      # Desktop takes an update only when SHA256SUMS carries this signature, checked against
+      # the public key it is built with.
+      - name: Sign
+        working-directory: dist
+        env: { SIGNING_KEY: "${{ secrets.PUBLR_RELEASE_SIGNING_KEY }}" }
+        run: |
+          umask 077
+          printf '%s\n' "$SIGNING_KEY" > ../signing.pem
+          openssl pkeyutl -sign -inkey ../signing.pem -rawin -in SHA256SUMS -out SHA256SUMS.sig
+          rm ../signing.pem
+          test "$(wc -c < SHA256SUMS.sig)" -eq 64
+
+      - name: Commit the version and tag it
+        working-directory: apps
+        run: |
+          sed -i -E "s/^( *\.version = \")[0-9]+\.[0-9]+\.[0-9]+(\",)$/\1$VERSION\2/" desktop/build.zig.zon
+          grep -q "\"$VERSION\"" desktop/build.zig.zon
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "Desktop $VERSION"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      # The notes cover Desktop's own changes: from its previous release, not the other apps'.
+      - name: Release
+        working-directory: dist
+        run: |
+          previous="$(git -C ../apps tag --list 'desktop-v*' --sort=-version:refname | grep -vx "$TAG" | head -1)"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+            ${previous:+--notes-start-tag "$previous"} \
+            --title "Publr Desktop $VERSION" Publr-Desktop-* workspace.txt SHA256SUMS SHA256SUMS.sig
+
+      - name: Merge the release into main
+        working-directory: apps
+        run: |
+          git fetch -q origin main
+          git checkout -q main
+          git reset -q --hard origin/main
+          git merge -q --no-edit "$TAG"
+          git push -q origin main
