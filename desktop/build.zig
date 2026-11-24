@@ -1,16 +1,22 @@
 const std = @import("std");
-const native_build = @import("native");
+const platform_build = @import("platform");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const native = b.dependency("native", .{
+    const platform = b.dependency("platform", .{
         .target = target,
         .optimize = optimize,
     });
     // The `publr` command's core (sites, servers, releases, sign-on), and the command itself,
-    // which Desktop carries beside its executable: the helper and sync run it.
-    const cli = b.dependency("publr_cli", .{
+    // which Desktop carries beside its executable: the helper and sync run it. The compiler
+    // it carries takes minutes to build: a release passes the archive built before.
+    const toolchain = b.option([]const u8, "toolchain-archive", "The archive of the compiler the publr command carries (cli's -Dtoolchain-archive)");
+    const cli = if (toolchain) |archive| b.dependency("publr_cli", .{
+        .target = target,
+        .optimize = optimize,
+        .@"toolchain-archive" = archive,
+    }) else b.dependency("publr_cli", .{
         .target = target,
         .optimize = optimize,
     });
@@ -22,18 +28,18 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{
-                    .name = "native",
-                    .module = native.module("native"),
+                    .name = "platform",
+                    .module = platform.module("platform"),
                 },
                 .{
                     .name = "ui",
-                    .module = native.module("ui"),
+                    .module = platform.module("ui"),
                 },
                 .{
                     // The same engine `ui` draws with (taken through native, so the build
                     // sees one copy).
                     .name = "publr_engine",
-                    .module = native.builder.dependency("publr_engine", .{
+                    .module = platform.builder.dependency("publr_engine", .{
                         .target = target,
                         .optimize = optimize,
                     }).module("publr_engine"),
@@ -54,7 +60,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
     // Beside Desktop in zig-out/bin too, so `zig build run` finds it as the app does.
     b.installArtifact(cli.artifact("publr"));
-    const app = native_build.addAppBundle(b, exe, "Publr Desktop", "app.publr.desktop", .{
+    const app = platform_build.addAppBundle(b, exe, "Publr Desktop", "app.publr.desktop", .{
         .version = @import("build.zig.zon").version,
         .icon = b.path("assets/AppIcon.icns"),
     });
@@ -78,7 +84,7 @@ pub fn build(b: *std.Build) void {
     const tidy = b.addExecutable(.{
         .name = "tidy",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("../publr/scripts/tidy.zig"),
+            .root_source_file = b.path("../../publr/scripts/tidy.zig"),
             .target = b.graph.host,
             .optimize = .debug,
         }),
@@ -108,7 +114,7 @@ fn add_build_info(b: *std.Build, module: *std.Build.Module) void {
 /// one PO file per language, `i18n/<language>.po`.
 fn add_languages(b: *std.Build, module: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.Optimize) void {
     module.addImport("publr_i18n", b.createModule(.{
-        .root_source_file = b.path("../publr/src/model/i18n/catalog.zig"),
+        .root_source_file = b.path("../../publr/src/model/i18n/catalog.zig"),
         .target = target,
         .optimize = optimize,
     }));
@@ -124,7 +130,7 @@ fn add_web(b: *std.Build, optimize: std.builtin.Optimize) void {
         .cpu_arch = .wasm32,
         .os_tag = .wasi,
     });
-    const native = b.dependency("native", .{
+    const platform = b.dependency("platform", .{
         .target = target,
         .optimize = optimize,
     });
@@ -141,16 +147,16 @@ fn add_web(b: *std.Build, optimize: std.builtin.Optimize) void {
             .link_libc = true,
             .imports = &.{
                 .{
-                    .name = "native",
-                    .module = native.module("native"),
+                    .name = "platform",
+                    .module = platform.module("platform"),
                 },
                 .{
                     .name = "ui",
-                    .module = native.module("ui"),
+                    .module = platform.module("ui"),
                 },
                 .{
                     .name = "publr_engine",
-                    .module = native.builder.dependency("publr_engine", .{
+                    .module = platform.builder.dependency("publr_engine", .{
                         .target = target,
                         .optimize = optimize,
                     }).module("publr_engine"),
@@ -180,6 +186,6 @@ fn add_web(b: *std.Build, optimize: std.builtin.Optimize) void {
     const web = b.step("web", "Publr Desktop for a browser page");
     web.dependOn(&install.step);
     // Beside it, what the page runs it with: the backend's page half and Publr's WASI files.
-    web.dependOn(&b.addInstallFile(native.path("src/web/desktop.js"), "web/desktop.js").step);
-    web.dependOn(&b.addInstallFile(b.path("../publr/browser/publr-files.js"), "web/publr-files.js").step);
+    web.dependOn(&b.addInstallFile(platform.path("src/web/desktop.js"), "web/desktop.js").step);
+    web.dependOn(&b.addInstallFile(b.path("../../publr/browser/publr-files.js"), "web/publr-files.js").step);
 }

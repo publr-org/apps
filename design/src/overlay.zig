@@ -3,10 +3,10 @@
 //! frame.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const host = @import("ui").host;
 
-const c = native.gpu.c;
+const c = platform.gpu.c;
 
 const shader =
     \\struct View { size: vec2f, pad: vec2f }

@@ -5,7 +5,7 @@
 //! same folders the command lists (`.agents/specs/publr-cli.md`).
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const ui = @import("ui");
 const bar = @import("bar.zig");
 const home = @import("home.zig");
@@ -83,7 +83,7 @@ const Ref = union(enum) {
 
 const Tab = struct {
     name: []const u8,
-    web: *native.WebView,
+    web: *platform.WebView,
     /// A Cloud project's tab: its admin's address (a local site's tab signs in through `p`).
     url: ?[]const u8 = null,
     /// A project's tab: its page under a strip (Overview, Admin, Site, its apps).
@@ -130,9 +130,9 @@ var io: Io = undefined;
 var sites: Sites = undefined;
 var support_dir: []const u8 = "";
 
-var window: *native.Window = undefined;
-var gpu: native.gpu.Gpu = undefined;
-var surface: native.gpu.Surface = undefined;
+var window: *platform.Window = undefined;
+var gpu: platform.gpu.Gpu = undefined;
+var surface: platform.gpu.Surface = undefined;
 var u: *ui.Ui = undefined;
 var thumbs: Thumbs = undefined;
 var theme: *const themes.Theme = &themes.light;
@@ -294,12 +294,12 @@ pub fn main(init: std.process.Init) !void {
     Io.Dir.cwd().createDirPath(io, support_dir) catch {};
     loadAppLanguage();
     loadSidebar();
-    native.spawn(command_line.ensure, .{ gpa, io, env }) catch {};
+    platform.spawn(command_line.ensure, .{ gpa, io, env }) catch {};
 
-    native.init(app_name);
-    native.onMenu(null, onMenu);
+    platform.init(app_name);
+    platform.onMenu(null, onMenu);
     buildMenus();
-    theme = themeFor(native.appearance());
+    theme = themeFor(platform.appearance());
     // `DESKTOP_THEME=light|dark`: one look whatever the system says (for screenshots).
     const forced = env.get("DESKTOP_THEME");
     if (forced) |f| theme = if (std.mem.eql(u8, f, "dark")) &themes.dark else &themes.light;
@@ -346,8 +346,8 @@ pub fn main(init: std.process.Init) !void {
         .running = siteRunning,
     });
     u = try ui.Ui.create(gpa);
-    gpu = try native.gpu.Gpu.init();
-    window = try native.Window.create(.{
+    gpu = try platform.gpu.Gpu.init();
+    window = try platform.Window.create(.{
         .on_event = onEvent,
         .on_message = onMessage,
         .on_new_window = onNewWindow,
@@ -375,7 +375,7 @@ pub fn main(init: std.process.Init) !void {
         timeHome();
         openSite(name);
         tabs.items[tabs.items.len - 1].web.addUserScript(timing_script);
-        native.run();
+        platform.run();
         return;
     }
     if (env.get("DESKTOP_VIEW")) |v| if (std.mem.eql(u8, v, "list")) {
@@ -438,7 +438,7 @@ pub fn main(init: std.process.Init) !void {
     if (env.get("DESKTOP_SIGN_IN") != null and cloud.status == .signed_out) cloud.signIn();
     welcomeIfNew();
     if (self_test) std.debug.print("desktop: window {d}, {d} sites, {d} tabs\n", .{ window.number(), sites.list.items.len, tabs.items.len });
-    native.run();
+    platform.run();
 }
 
 /// The folder after `--open` among Desktop's arguments, or null.
@@ -450,14 +450,14 @@ fn openArg(init: std.process.Init) ?[]const u8 {
     return null;
 }
 
-fn themeFor(a: native.Appearance) *const themes.Theme {
+fn themeFor(a: platform.Appearance) *const themes.Theme {
     return if (a == .dark) &themes.dark else &themes.light;
 }
 
 fn buildMenus() void {
     // Titles in the person's language, made again when it changes (the menus copy them).
     var names: [5][128]u8 = undefined;
-    const settings_item: native.MenuItem = .{
+    const settings_item: platform.MenuItem = .{
         .title = menuTitle(&names[0], translated("Settings…")),
         .key = ",",
         .tag = Tag.settings,
@@ -465,7 +465,7 @@ fn buildMenus() void {
     // Check for Updates… under About, as macOS apps put it (Restart to Update once one is
     // in place); a build from source takes none.
     if (updater_ready and updater.enabled()) {
-        native.setAppMenuItems(&.{
+        platform.setAppMenuItems(&.{
             .{
                 .title = menuTitle(&names[1], if (updater.state == .ready) translated("Restart to Update") else translated("Check for Updates…")),
                 .tag = Tag.updates,
@@ -476,9 +476,9 @@ fn buildMenus() void {
             settings_item,
         });
     } else {
-        native.setAppMenuItems(&.{settings_item});
+        platform.setAppMenuItems(&.{settings_item});
     }
-    native.setMenu("File", &.{
+    platform.setMenu("File", &.{
         .{
             .title = menuTitle(&names[0], translated("Home")),
             .key = "t",
@@ -490,7 +490,7 @@ fn buildMenus() void {
             .tag = Tag.close_tab,
         },
     });
-    native.setMenu("View", &.{
+    platform.setMenu("View", &.{
         .{
             .title = menuTitle(&names[0], translated("Reload")),
             .key = "r",
@@ -509,7 +509,7 @@ fn buildMenus() void {
             .tag = Tag.refresh_sites,
         },
     });
-    var tab_items: [9]native.MenuItem = undefined;
+    var tab_items: [9]platform.MenuItem = undefined;
     var tab_names: [9][128]u8 = undefined;
     const digits = [_][:0]const u8{ "1", "2", "3", "4", "5", "6", "7", "8", "9" };
     for (&tab_items, 0..) |*it, i| {
@@ -522,7 +522,7 @@ fn buildMenus() void {
             .tag = @intCast(Tag.tab + i),
         };
     }
-    native.setMenu("Tabs", &tab_items);
+    platform.setMenu("Tabs", &tab_items);
 }
 
 /// `text` with its `{name}`s filled (`i18n.fill`), in `a`.
@@ -741,13 +741,13 @@ fn showInFinder(name: []const u8) void {
     var buf: [1024]u8 = undefined;
     const folder = sites.folderOf(name);
     if (folder.len == 0) return;
-    native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "file://{s}", .{folder}, 0) catch return);
+    platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "file://{s}", .{folder}, 0) catch return);
 }
 
 /// The site's folder, whole, on the clipboard: `cd` there in Terminal and start an agent.
 fn copyPath(name: []const u8) void {
     const folder = sites.folderOf(name);
-    if (folder.len > 0) native.setClipboardText(folder);
+    if (folder.len > 0) platform.setClipboardText(folder);
 }
 
 fn siteRunning(name: []const u8) bool {
@@ -1073,7 +1073,7 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
 
 // Events.
 
-fn onEvent(_: ?*anyopaque, win: *native.Window, event: native.Event) void {
+fn onEvent(_: ?*anyopaque, win: *platform.Window, event: platform.Event) void {
     // Back from installing a tool, or from Cursor's own Install.
     if (event == .focus and event.focus) {
         tools.check();
@@ -1158,7 +1158,7 @@ fn hitAt(x: f64, y: f64) Hover {
     };
 }
 
-fn setHover(win: *native.Window, h: Hover) void {
+fn setHover(win: *platform.Window, h: Hover) void {
     if (std.meta.eql(h, hover)) return;
     // "Copied" lasts while the pointer stays on it.
     if (std.meta.eql(hover, Hover{ .project = .copy_path })) if (active) |i| if (tabs.items[i].project) |pt| {
@@ -1180,7 +1180,7 @@ fn setHover(win: *native.Window, h: Hover) void {
     });
 }
 
-fn click(win: *native.Window, m: native.event.Mouse) void {
+fn click(win: *platform.Window, m: platform.event.Mouse) void {
     switch (hitAt(m.x, m.y)) {
         .none => if (m.y < bar.height) {
             // The bar's empty part (or the lights' corner).
@@ -1201,7 +1201,7 @@ fn click(win: *native.Window, m: native.event.Mouse) void {
     }
 }
 
-fn clickHome(t: home.Target, m: native.event.Mouse) void {
+fn clickHome(t: home.Target, m: platform.event.Mouse) void {
     switch (t) {
         .outside_menu => menu = null,
         .menu_item => |k| {
@@ -1275,8 +1275,8 @@ fn actProject(space: usize, k: usize, tag: u32) void {
     var buf: [512]u8 = undefined;
     switch (tag) {
         Action.open_project => openProject(space, k),
-        Action.view_live => native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{p.address}, 0) catch return),
-        Action.project_dashboard => native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}/projects/{s}", .{ cloud.base, p.slug }, 0) catch return),
+        Action.view_live => platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{p.address}, 0) catch return),
+        Action.project_dashboard => platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}/projects/{s}", .{ cloud.base, p.slug }, 0) catch return),
         else => {},
     }
 }
@@ -1284,7 +1284,7 @@ fn actProject(space: usize, k: usize, tag: u32) void {
 fn actAccount(tag: u32) void {
     var buf: [512]u8 = undefined;
     switch (tag) {
-        Action.open_dashboard => native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{cloud.base}, 0) catch return),
+        Action.open_dashboard => platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{cloud.base}, 0) catch return),
         Action.sign_out => {
             cloud.signOut();
             if (view == .space or view == .cloud) view = .all;
@@ -1449,7 +1449,7 @@ fn changeApp(action: []const u8) void {
     };
     // The running server loads the apps again; the card shows them as they are now.
     const folder_copy = gpa.dupe(u8, folder) catch "";
-    native.spawn(loadApps, .{folder_copy}) catch {};
+    platform.spawn(loadApps, .{folder_copy}) catch {};
     const s = sites.find(pt.folder);
     const base = if (pt.live.len > 0) pt.live else if (s) |found_site| found_site.address else "";
     pt.apps = project.readApps(io, pt.arena.allocator(), folder, base);
@@ -1570,14 +1570,14 @@ fn projectsOwn(pt: *const ProjectTab, address: []const u8) bool {
 
 /// A link to another address, clicked in a tab: the project's own load there; any other opens
 /// in the person's browser.
-fn followLink(web: *native.WebView, url: []const u8) void {
+fn followLink(web: *platform.WebView, url: []const u8) void {
     var buf: [4096]u8 = undefined;
     const link = std.fmt.bufPrintSentinel(&buf, "{s}", .{url}, 0) catch return;
     for (tabs.items) |t| if (t.web == web) {
         if (t.project) |pt| if (projectsOwn(pt, url)) return web.loadUrl(link);
         break;
     };
-    native.openInBrowser(link);
+    platform.openInBrowser(link);
 }
 
 /// An app's picture's name: its project's folder and its own.
@@ -1650,7 +1650,7 @@ fn siteOf(pt: *const ProjectTab) []const u8 {
 
 /// A page asks for a new window: a project's admin (a deploy's "Open admin", signed in once)
 /// opens in that project's tab, as its Admin does; anything else goes to the browser.
-fn onNewWindow(_: ?*anyopaque, _: *native.WebView, url: []const u8) bool {
+fn onNewWindow(_: ?*anyopaque, _: *platform.WebView, url: []const u8) bool {
     const host = hostOnly(url);
     if (host.len == 0) return false;
     if (openInProjectTab(url, host)) return true;
@@ -1692,7 +1692,7 @@ fn openInProjectTab(url: []const u8, host: []const u8) bool {
             .name = t.name,
             .web = t.web,
         };
-        native.spawn(SignIn.run, .{job}) catch return true;
+        platform.spawn(SignIn.run, .{job}) catch return true;
         redrawAll();
         return true;
     }
@@ -1737,7 +1737,7 @@ fn sitePageAt(i: usize, address: []const u8) void {
             .path = gpa.dupe(u8, path) catch return gpa.destroy(job),
             .owns_path = true,
         };
-        native.spawn(SignIn.run, .{job}) catch return;
+        platform.spawn(SignIn.run, .{job}) catch return;
         return;
     }
     // Cloud: a one-time sign-on each time, landing on the page.
@@ -1761,7 +1761,7 @@ fn adminAt(i: usize, path: []const u8, direct: ?[]const u8) void {
             .web = t.web,
             .path = path,
         };
-        native.spawn(SignIn.run, .{job}) catch return;
+        platform.spawn(SignIn.run, .{job}) catch return;
         return;
     }
     const admin = t.url orelse return;
@@ -1849,14 +1849,14 @@ fn viewInBrowser(name: []const u8) void {
     const s = sites.find(name) orelse return;
     rememberRecent(name);
     var buf: [512]u8 = undefined;
-    if (s.live.len > 0) return native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.live}, 0) catch return);
-    if (s.running) return native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.address}, 0) catch return);
+    if (s.live.len > 0) return platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.live}, 0) catch return);
+    if (s.running) return platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.address}, 0) catch return);
     const job = gpa.create(ViewSite) catch return;
     job.* = .{
         .name = gpa.dupe(u8, name) catch return gpa.destroy(job),
         .address = gpa.dupeSentinel(u8, s.address, 0) catch return gpa.destroy(job),
     };
-    native.spawn(ViewSite.run, .{job}) catch return;
+    platform.spawn(ViewSite.run, .{job}) catch return;
 }
 
 const ViewSite = struct {
@@ -1865,7 +1865,7 @@ const ViewSite = struct {
 
     fn run(self: *ViewSite) void {
         sites.start(self.name);
-        native.runOnMain(self, opened);
+        platform.runOnMain(self, opened);
     }
 
     fn opened(ctx: ?*anyopaque) callconv(.c) void {
@@ -1873,7 +1873,7 @@ const ViewSite = struct {
         defer gpa.destroy(self);
         defer gpa.free(self.name);
         defer gpa.free(self.address);
-        native.openInBrowser(self.address);
+        platform.openInBrowser(self.address);
         refreshSites();
         redrawAll();
     }
@@ -1888,14 +1888,14 @@ fn act(name: []const u8, tag: u32) void {
         Action.preview_changes => openSite(name),
         Action.view_site => {
             var buf: [256]u8 = undefined;
-            native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.address}, 0) catch return);
+            platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.address}, 0) catch return);
         },
         Action.finder => showInFinder(name),
         Action.copy_path => copyPath(name),
         Action.deploy => return deploy(name),
         Action.view_live_local => {
             var buf: [512]u8 = undefined;
-            native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.live}, 0) catch return);
+            platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.live}, 0) catch return);
         },
         Action.stop => sites.stop(name),
         Action.start => sites.start(name),
@@ -1912,7 +1912,7 @@ fn act(name: []const u8, tag: u32) void {
 }
 
 /// The page sent a message (only the timing mode's pages do).
-fn onMessage(_: ?*anyopaque, web: *native.WebView, text: []const u8) void {
+fn onMessage(_: ?*anyopaque, web: *platform.WebView, text: []const u8) void {
     if (thumbs.onMessage(web, text)) return;
     // The page moved: the address bar says where it is now.
     if (std.mem.eql(u8, text, location_message)) return redrawAll();
@@ -1920,7 +1920,7 @@ fn onMessage(_: ?*anyopaque, web: *native.WebView, text: []const u8) void {
     if (timing_site == null) return;
     std.debug.print("page {s}\n", .{text});
     // The sign-in link lands on /admin first; then each page in turn.
-    if (timing_step == timing_pages.len) return native.quit();
+    if (timing_step == timing_pages.len) return platform.quit();
     var buf: [512]u8 = undefined;
     const site = sites.find(timing_site.?) orelse return;
     const host = if (std.mem.indexOf(u8, site.address, "://")) |i| site.address[i + 3 ..] else site.address;
@@ -2141,7 +2141,7 @@ fn welcomeState() welcome.State {
     };
 }
 
-fn welcomeEvent(win: *native.Window, event: native.Event) void {
+fn welcomeEvent(win: *platform.Window, event: platform.Event) void {
     const typing = welcome_step == .email;
     switch (event) {
         .mouse_move => |m| {
@@ -2163,7 +2163,7 @@ fn welcomeEvent(win: *native.Window, event: native.Event) void {
             .by_hand => chooseWelcome(.by_hand),
             .one_account => chooseWelcome(.one_account),
             .confirm => nextWelcome(),
-            .link => native.openInBrowser(if (welcome_step == .tools) ai_docs else accounts_docs),
+            .link => platform.openInBrowser(if (welcome_step == .tools) ai_docs else accounts_docs),
             .tool_claude, .tool_codex, .tool_cursor, .tool_vscode, .tool_other => |h| {
                 tools.connect(welcome.toolOf(h).?);
                 redrawAll();
@@ -2356,7 +2356,7 @@ fn localState(fields: *[2]sheet.Field) sheet.State {
     };
 }
 
-fn sheetEvent(win: *native.Window, event: native.Event) void {
+fn sheetEvent(win: *platform.Window, event: platform.Event) void {
     if (open_sheet == .welcome) return welcomeEvent(win, event);
     var fields: [2]sheet.Field = undefined;
     switch (event) {
@@ -2375,7 +2375,7 @@ fn sheetEvent(win: *native.Window, event: native.Event) void {
         .mouse_down => |m| switch (sheet.hit(sheetState(&fields), u, m.x, m.y)) {
             .primary => primaryAction(),
             .cancel => if (deploy_job == null) closeSheet(),
-            .link => native.openInBrowser(accounts_docs),
+            .link => platform.openInBrowser(accounts_docs),
             .field => |i| if (open_sheet == .new_project or open_sheet == .edit_app) {
                 sheet_focus = i;
                 redrawAll();
@@ -2448,7 +2448,7 @@ fn primaryAction() void {
         .deploy => startDeploy(),
         .deployed => {
             var buf: [512]u8 = undefined;
-            native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{deployed_address}, 0) catch return);
+            platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{deployed_address}, 0) catch return);
             closeSheet();
         },
     }
@@ -2471,7 +2471,7 @@ fn deploy(name: []const u8) void {
     }
     if (cloud.spaces.len == 0) {
         var buf: [512]u8 = undefined;
-        native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}/welcome", .{cloud.base}, 0) catch return);
+        platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}/welcome", .{cloud.base}, 0) catch return);
         return;
     }
     if (active != null) showHome();
@@ -2692,7 +2692,7 @@ fn createSite() void {
     };
     sheet_busy = translated("Making the site…");
     redrawAll();
-    native.spawn(NewSite.run, .{job}) catch return;
+    platform.spawn(NewSite.run, .{job}) catch return;
 }
 
 // New project.
@@ -2775,7 +2775,7 @@ const NewSite = struct {
 
     fn run(self: *NewSite) void {
         self.ok = sites.make(self.name, self.admin);
-        native.runOnMain(self, done);
+        platform.runOnMain(self, done);
     }
 
     fn done(ctx: ?*anyopaque) callconv(.c) void {
@@ -2899,7 +2899,7 @@ fn projectPage(i: usize) project.State {
     };
 }
 
-fn clickProject(i: usize, target: project.Target, mods: native.event.Mods) void {
+fn clickProject(i: usize, target: project.Target, mods: platform.event.Mods) void {
     const t = tabs.items[i];
     const pt = t.project orelse return;
     const was_open = pt.menu_open;
@@ -2931,7 +2931,7 @@ fn clickProject(i: usize, target: project.Target, mods: native.event.Mods) void 
         // Command-click: the app itself, in the browser, not in its tab.
         .app => |k| if (mods.command and k < pt.apps.len) {
             var buf: [2048]u8 = undefined;
-            native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{pt.apps[k].address}, 0) catch return);
+            platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{pt.apps[k].address}, 0) catch return);
         } else goTo(i, .{
             .app = k,
         }),
@@ -2944,7 +2944,7 @@ fn clickProject(i: usize, target: project.Target, mods: native.event.Mods) void 
             .deploy => deploy(pt.folder),
             .dashboard => {
                 var buf: [512]u8 = undefined;
-                native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}/projects/{s}", .{ cloud.base, syncing.slugOf(pt.live) }, 0) catch return);
+                platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}/projects/{s}", .{ cloud.base, syncing.slugOf(pt.live) }, 0) catch return);
             },
             .remove => {
                 const folder = gpa.dupe(u8, pt.folder) catch return;
@@ -2978,7 +2978,7 @@ fn openSite(name: []const u8) void {
         .name = owned,
         .web = web,
     };
-    native.spawn(SignIn.run, .{job}) catch return;
+    platform.spawn(SignIn.run, .{job}) catch return;
 }
 
 fn closeTab(i: usize) void {
@@ -3038,7 +3038,7 @@ const RemoteJob = struct {
         const token = remote.tokenFor(io, a, env_map, self.live);
         if (token == null and self.sign_on.len == 0 and cloud.token != null) {
             self.needs_sign_in = true;
-            return native.runOnMain(self, finished);
+            return platform.runOnMain(self, finished);
         }
         switch (self.kind) {
             .apps => if (token) |t| {
@@ -3046,7 +3046,7 @@ const RemoteJob = struct {
             },
             .clone => self.clone(a),
         }
-        native.runOnMain(self, finished);
+        platform.runOnMain(self, finished);
     }
 
     /// `publr clone`, its progress page opened in the tab the moment the command prints it;
@@ -3073,7 +3073,7 @@ const RemoteJob = struct {
                 .live = gpa.dupe(u8, self.live) catch continue,
                 .url = gpa.dupeSentinel(u8, url, 0) catch continue,
             };
-            native.runOnMain(opened, PageOpened.load);
+            platform.runOnMain(opened, PageOpened.load);
         }
         var errors: [4096]u8 = undefined;
         var err_reader = child.stderr.?.readerStreaming(io, &errors);
@@ -3178,7 +3178,7 @@ fn startRemote(kind: RemoteKind, live: []const u8, sign_on: []const u8) void {
         .sign_on = gpa.dupe(u8, sign_on) catch return gpa.destroy(job),
         .arena = .init(gpa),
     };
-    native.spawn(RemoteJob.run, .{job}) catch return;
+    platform.spawn(RemoteJob.run, .{job}) catch return;
 }
 
 /// Cloud's sign-on token for a project a job waited on: the job again, signing in first.
@@ -3273,7 +3273,7 @@ fn becameLocal(pt: *ProjectTab) void {
 
 const SignIn = struct {
     name: []const u8,
-    web: *native.WebView,
+    web: *platform.WebView,
     /// The page it opens on: the admin's, or the site's.
     path: []const u8 = "/admin",
     /// `path` is the job's own copy, freed with it.
@@ -3285,7 +3285,7 @@ const SignIn = struct {
             std.debug.print("desktop: signing in to {s} failed: {}\n", .{ self.name, e });
             break :blk null;
         };
-        native.runOnMain(self, load);
+        platform.runOnMain(self, load);
     }
 
     fn load(ctx: ?*anyopaque) callconv(.c) void {
@@ -3333,7 +3333,7 @@ fn openInBrowser(t: Tab) void {
     // A page elsewhere (a link that loaded here): that page itself.
     if (t.project) |pt| if (address.len > 0 and !projectsOwn(pt, address)) {
         var outside: [4096]u8 = undefined;
-        return native.openInBrowser(std.fmt.bufPrintSentinel(&outside, "{s}", .{address}, 0) catch return);
+        return platform.openInBrowser(std.fmt.bufPrintSentinel(&outside, "{s}", .{address}, 0) catch return);
     };
     var path: []const u8 = "/";
     if (std.mem.indexOf(u8, address, "://")) |scheme| {
@@ -3358,7 +3358,7 @@ fn openPathInBrowser(t: Tab, path: []const u8, address: []const u8) void {
             std.fmt.bufPrintSentinel(&buf, "{s}", .{t.url.?}, 0)
         else
             std.fmt.bufPrintSentinel(&buf, "{s}{s}", .{ std.mem.trimEnd(u8, pt.live, "/"), path }, 0);
-        return native.openInBrowser(url catch return);
+        return platform.openInBrowser(url catch return);
     }
     if (sign_on_return) |old| gpa.free(old);
     sign_on_return = gpa.dupe(u8, path) catch null;
@@ -3371,7 +3371,7 @@ fn browserSignedOn(signed: @import("cloud.zig").SignedOn) void {
         std.debug.print("desktop: signing in to {s} for the browser: {s}\n", .{ signed.slug, pr });
         return;
     }
-    native.openInBrowser(withReturn(signed.url));
+    platform.openInBrowser(withReturn(signed.url));
 }
 
 // What Desktop keeps between starts.
@@ -3436,6 +3436,7 @@ fn rememberRecent(name: []const u8) void {
 
 test {
     _ = deploying;
+    _ = updating;
     _ = bar;
     _ = home;
     _ = project;
@@ -3676,7 +3677,7 @@ fn clickUpdate() void {
         .ready => updater.restart(),
         .available => {
             var buffer: [512]u8 = undefined;
-            native.openInBrowser(std.fmt.bufPrintSentinel(&buffer, "{s}", .{updater.page()}, 0) catch return);
+            platform.openInBrowser(std.fmt.bufPrintSentinel(&buffer, "{s}", .{updater.page()}, 0) catch return);
         },
         else => updater.check(),
     }
@@ -3743,11 +3744,11 @@ const ChooseFolder = struct {
     chosen: []u8 = &.{},
 
     fn run(job: *ChooseFolder) void {
-        const script = std.fmt.allocPrint(gpa, "POSIX path of (choose folder with prompt \"{s}\")", .{job.prompt}) catch return native.runOnMain(job, finish);
+        const script = std.fmt.allocPrint(gpa, "POSIX path of (choose folder with prompt \"{s}\")", .{job.prompt}) catch return platform.runOnMain(job, finish);
         defer gpa.free(script);
         const result = std.process.run(gpa, io, .{
             .argv = &.{ "osascript", "-e", script },
-        }) catch return native.runOnMain(job, finish);
+        }) catch return platform.runOnMain(job, finish);
         defer gpa.free(result.stderr);
         const ok = result.term == .exited and result.term.exited == 0;
         if (ok) {
@@ -3755,7 +3756,7 @@ const ChooseFolder = struct {
             job.chosen = gpa.dupe(u8, path) catch &.{};
         }
         gpa.free(result.stdout);
-        native.runOnMain(job, finish);
+        platform.runOnMain(job, finish);
     }
 
     fn finish(ctx: ?*anyopaque) callconv(.c) void {
@@ -3796,7 +3797,7 @@ fn chooseFolder(purpose: FolderFor) void {
     };
     settings_busy = translated("Choosing a folder…");
     redrawAll();
-    native.spawn(ChooseFolder.run, .{job}) catch {
+    platform.spawn(ChooseFolder.run, .{job}) catch {
         settings_busy = null;
         gpa.destroy(job);
         return;
@@ -3827,7 +3828,7 @@ const ChoosePublr = struct {
     failed: bool = false,
 
     fn run(job: *ChoosePublr) void {
-        defer native.runOnMain(job, finish);
+        defer platform.runOnMain(job, finish);
         var path: []u8 = &.{};
         defer gpa.free(path);
         if (!job.clear) {
@@ -3877,7 +3878,7 @@ fn choosePublr(name: ?[]const u8, clear: bool) void {
         settings_busy = if (clear) translated("Going back to each site's release…") else translated("Choosing a Publr…");
         redrawAll();
     }
-    native.spawn(ChoosePublr.run, .{job}) catch {
+    platform.spawn(ChoosePublr.run, .{job}) catch {
         if (name == null) settings_busy = null;
         if (job.name) |n| gpa.free(n);
         gpa.destroy(job);

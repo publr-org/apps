@@ -3,17 +3,17 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const native = b.dependency("publr_native", .{
+    const platform = b.dependency("platform", .{
         .target = target,
         .optimize = optimize,
     });
-    // The engine as `native` has it (its `ui` draws with it): one copy in the build.
-    const engine = native.builder.dependency("publr_engine", .{
+    // The engine as `platform` has it (its `ui` draws with it): one copy in the build.
+    const engine = platform.builder.dependency("publr_engine", .{
         .target = target,
         .optimize = optimize,
     });
     const exe = b.addExecutable(.{
-        .name = "publr-design-native",
+        .name = "publr-design",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
@@ -25,12 +25,12 @@ pub fn build(b: *std.Build) void {
                     .module = engine.module("publr_engine"),
                 },
                 .{
-                    .name = "native",
-                    .module = native.module("native"),
+                    .name = "platform",
+                    .module = platform.module("platform"),
                 },
                 .{
                     .name = "ui",
-                    .module = native.module("ui"),
+                    .module = platform.module("ui"),
                 },
             },
         }),

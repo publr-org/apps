@@ -1,9 +1,9 @@
-//! A one-line text field: its text, caret and selection, edited by `native`'s `.text` and
+//! A one-line text field: its text, caret and selection, edited by `platform`'s `.text` and
 //! `.text_command` events (so input methods, the system's key bindings and the clipboard
 //! all work) and drawn with the `ui`. The app owns one per field and says which has focus.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const ui = @import("ui.zig");
 
 pub const TextField = struct {
@@ -55,7 +55,7 @@ pub const TextField = struct {
     }
 
     /// Applies a text event; true when the field changed (redraw).
-    pub fn handle(self: *TextField, event: native.Event) bool {
+    pub fn handle(self: *TextField, event: platform.Event) bool {
         switch (event) {
             .text => |t| switch (t.kind) {
                 .insert => {
@@ -77,7 +77,7 @@ pub const TextField = struct {
         return true;
     }
 
-    fn command(self: *TextField, c: native.event.TextCommand) bool {
+    fn command(self: *TextField, c: platform.event.TextCommand) bool {
         const s = self.text.items;
         const from, const to = self.selection();
         switch (c) {
@@ -115,11 +115,11 @@ pub const TextField = struct {
             },
             .copy, .cut => {
                 if (from == to) return false;
-                native.setClipboardText(s[from..to]);
+                platform.setClipboardText(s[from..to]);
                 if (c == .cut) self.replaceSelection("");
             },
             .paste => {
-                const clip = native.clipboardText(self.gpa) orelse return false;
+                const clip = platform.clipboardText(self.gpa) orelse return false;
                 defer self.gpa.free(clip);
                 for (clip) |*ch| if (ch.* == '\n' or ch.* == '\r' or ch.* == '\t') {
                     ch.* = ' ';
@@ -151,7 +151,7 @@ pub const TextField = struct {
 
     /// Draws the field in `r`, with the caret and selection when it has focus; tells the
     /// window where the caret is (for input methods).
-    pub fn draw(self: *TextField, u: *ui.Ui, r: ui.Rect, look: Look, focused: bool, placeholder: []const u8, window: ?*native.Window) !void {
+    pub fn draw(self: *TextField, u: *ui.Ui, r: ui.Rect, look: Look, focused: bool, placeholder: []const u8, window: ?*platform.Window) !void {
         try u.box(r, .{
             .fill = look.background,
             .border = if (focused) look.focus else look.border,
@@ -270,19 +270,19 @@ fn nextWord(s: []const u8, at: usize) usize {
 test "typing, moving and deleting" {
     var f = TextField.init(std.testing.allocator);
     defer f.deinit();
-    _ = f.handle(.{ .text = native.event.Text.of(.insert, "zółć") });
+    _ = f.handle(.{ .text = platform.event.Text.of(.insert, "zółć") });
     try std.testing.expectEqualStrings("zółć", f.value());
     _ = f.handle(.{ .text_command = .left });
     _ = f.handle(.{ .text_command = .delete_backward });
     try std.testing.expectEqualStrings("zóć", f.value());
     _ = f.handle(.{ .text_command = .select_all });
-    _ = f.handle(.{ .text = native.event.Text.of(.insert, "new shop") });
+    _ = f.handle(.{ .text = platform.event.Text.of(.insert, "new shop") });
     try std.testing.expectEqualStrings("new shop", f.value());
     _ = f.handle(.{ .text_command = .delete_word_backward });
     try std.testing.expectEqualStrings("new ", f.value());
     // A composition shows but is not the value until committed.
-    _ = f.handle(.{ .text = native.event.Text.of(.marked, "´") });
+    _ = f.handle(.{ .text = platform.event.Text.of(.marked, "´") });
     try std.testing.expectEqualStrings("new ", f.value());
-    _ = f.handle(.{ .text = native.event.Text.of(.insert, "é") });
+    _ = f.handle(.{ .text = platform.event.Text.of(.insert, "é") });
     try std.testing.expectEqualStrings("new é", f.value());
 }

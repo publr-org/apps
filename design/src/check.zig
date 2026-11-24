@@ -2,12 +2,12 @@
 //! time benchmark, natively.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const engine = @import("publr_engine");
 const host_mod = @import("ui").host;
 const doc = @import("doc.zig");
 
-const c = native.gpu.c;
+const c = platform.gpu.c;
 const Io = std.Io;
 const Host = host_mod.Host;
 const Timer = host_mod.Timer;
@@ -21,7 +21,7 @@ pub fn gpucheck(io: Io, gpa: std.mem.Allocator, args: []const [:0]const u8) !voi
     const filter: []const u8 = if (args.len > 2) args[2] else "";
     const session = try engine.session.Session.create(gpa);
     try doc.open(io, gpa, session, args[0]);
-    var gpu = try native.gpu.Gpu.init();
+    var gpu = try platform.gpu.Gpu.init();
     const host = try Host.init(gpa, &gpu, c.WGPUTextureFormat_RGBA8Unorm);
     var scene = engine.gpu_scene.Scene.init(gpa);
 
@@ -83,7 +83,7 @@ pub fn bench(io: Io, gpa: std.mem.Allocator, args: []const [:0]const u8) !void {
     const page: usize = if (args.len > 2) try std.fmt.parseInt(usize, args[2], 10) else 0;
     const session = try engine.session.Session.create(gpa);
     try doc.open(io, gpa, session, args[0]);
-    var gpu = try native.gpu.Gpu.init();
+    var gpu = try platform.gpu.Gpu.init();
     const format = c.WGPUTextureFormat_BGRA8Unorm;
     const host = try Host.init(gpa, &gpu, format);
     var scene = engine.gpu_scene.Scene.init(gpa);
@@ -111,7 +111,7 @@ pub fn bench(io: Io, gpa: std.mem.Allocator, args: []const [:0]const u8) !void {
     const bg: [3]f32 = if (pg.background) |b| .{ b.r, b.g, b.b } else .{ 0.96, 0.96, 0.96 };
 
     const Frame = struct {
-        fn run(hst: *Host, sc: *engine.gpu_scene.Scene, s: *engine.session.Session, page_index: usize, g: *native.gpu.Gpu, o: c.WGPUTextureView, ww: u32, hh: u32, vx: f64, vy: f64, z: f64, d: f64, moving: bool, b: [3]f32) ![3]f64 {
+        fn run(hst: *Host, sc: *engine.gpu_scene.Scene, s: *engine.session.Session, page_index: usize, g: *platform.gpu.Gpu, o: c.WGPUTextureView, ww: u32, hh: u32, vx: f64, vy: f64, z: f64, d: f64, moving: bool, b: [3]f32) ![3]f64 {
             var t = Timer.start();
             const scale: f32 = @floatCast(z * d);
             sc.motion = moving;

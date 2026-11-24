@@ -16,7 +16,7 @@ const svg = @import("svg.zig");
 /// PublrEngine's GPU frame drawn with WebGPU: what `draw` uses, and PublrDesign's canvas.
 pub const host = @import("host.zig");
 const draw_mod = @import("draw.zig");
-const native = @import("native");
+const platform = @import("platform");
 
 pub const Color = m.Color;
 
@@ -112,7 +112,7 @@ pub const Ui = struct {
     /// frame's nodes are this session's page when drawn on the GPU (`draw`).
     session: *engine.session.Session,
     /// The GPU path, once `attachGpu` gave it a device (none in a browser).
-    gpu: if (native.web) void else ?*draw_mod.Gpu = if (native.web) {} else null,
+    gpu: if (platform.web) void else ?*draw_mod.Gpu = if (platform.web) {} else null,
     next_id: u32 = 0,
 
     /// A UI on the heap (the GPU path points into it, so it must not move).
@@ -129,7 +129,7 @@ pub const Ui = struct {
     }
 
     pub fn destroy(self: *Ui) void {
-        if (!native.web) {
+        if (!platform.web) {
             if (self.gpu) |g| g.destroy();
         }
         self.session.destroy();
@@ -251,7 +251,7 @@ pub const Ui = struct {
         const replaced = self.session.images.contains(key);
         try self.session.addImage(key, img);
         // The GPU's copy of the old picture goes.
-        if (!native.web) {
+        if (!platform.web) {
             if (replaced) if (self.gpu) |g| g.host.forgetImage(key);
         }
     }
@@ -374,8 +374,8 @@ pub const Ui = struct {
 
     /// Gives the UI the GPU path: frames drawn with `draw` on `gpu`'s device, into
     /// targets of `format` (a window's surface format).
-    pub fn attachGpu(self: *Ui, gpu: *native.gpu.Gpu, format: native.gpu.c.WGPUTextureFormat) !void {
-        if (native.web) return;
+    pub fn attachGpu(self: *Ui, gpu: *platform.gpu.Gpu, format: platform.gpu.c.WGPUTextureFormat) !void {
+        if (platform.web) return;
         if (self.gpu != null) return;
         self.gpu = try draw_mod.Gpu.create(self.gpa, gpu, format);
     }
@@ -384,9 +384,9 @@ pub const Ui = struct {
     /// given), `width` x `height` device pixels at `scale` per point, over `background`,
     /// and submits it. Answers whether to draw again soon: something of this frame is
     /// still coming (glyph masks over the per-frame budget).
-    pub fn draw(self: *Ui, view: native.gpu.c.WGPUTextureView, width: u32, height: u32, scale: f32, background: Color) !bool {
+    pub fn draw(self: *Ui, view: platform.gpu.c.WGPUTextureView, width: u32, height: u32, scale: f32, background: Color) !bool {
         // In a browser the frame is drawn on the CPU and the window puts it on the canvas.
-        if (native.web) {
+        if (platform.web) {
             var px = try self.render(width, height, scale, background);
             defer px.deinit(self.gpa);
             const bytes = try self.gpa.alloc(u8, px.data.len * 4);

@@ -2,7 +2,7 @@
 //! texture, uploaded when the frame changes, drawn as a full-target triangle.
 
 const std = @import("std");
-const gpu = @import("native").gpu;
+const gpu = @import("platform").gpu;
 const c = gpu.c;
 const Pixmap = @import("publr_engine").pixmap.Pixmap;
 

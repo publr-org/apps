@@ -1,4 +1,4 @@
-//! `native.gpu` in a browser: the same names, but the UI draws its frames on the CPU and the
+//! `platform.gpu` in a browser: the same names, but the UI draws its frames on the CPU and the
 //! window puts them on the page's canvas (`Window.present`). A surface's frame is the window.
 
 const std = @import("std");

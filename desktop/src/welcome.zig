@@ -6,7 +6,7 @@
 //! hit testing together.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const ui = @import("ui");
 const icons = @import("publr_icons");
 const Theme = @import("theme.zig").Theme;
@@ -343,7 +343,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     return .none;
 }
 
-pub fn draw(u: *ui.Ui, s: State, t: *const Theme, window: *native.Window) !void {
+pub fn draw(u: *ui.Ui, s: State, t: *const Theme, window: *platform.Window) !void {
     try u.rect(.{
         .x = 0,
         .y = 0,
@@ -575,7 +575,7 @@ fn drawTools(u: *ui.Ui, s: State, t: *const Theme) !void {
     }
 }
 
-fn drawEmail(u: *ui.Ui, s: State, t: *const Theme, window: *native.Window) !void {
+fn drawEmail(u: *ui.Ui, s: State, t: *const Theme, window: *platform.Window) !void {
     const f = fieldRect(s);
     try u.text(.{
         .x = f.x,

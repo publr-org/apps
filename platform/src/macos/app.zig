@@ -1,6 +1,6 @@
 //! The macOS backend: AppKit through the Objective-C runtime. One NSApplication, windows
 //! whose content is a CAMetalLayer (drawn by the app on the GPU), web views (WKWebView), or
-//! both: a GPU bar above web views. Every input event becomes a `native.Event`.
+//! both: a GPU bar above web views. Every input event becomes a `platform.Event`.
 
 const std = @import("std");
 const objc = @import("objc.zig");
@@ -500,7 +500,7 @@ const SnapshotBlock = extern struct {
         if (image == null) {
             if (err != null) {
                 const d: [*:0]const u8 = @ptrCast(objc.msg(objc.msg(err, "localizedDescription"), "UTF8String"));
-                std.debug.print("native: snapshot failed: {s}\n", .{d});
+                std.debug.print("platform: snapshot failed: {s}\n", .{d});
             }
             return self.done(self.ctx, null);
         }

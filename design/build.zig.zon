@@ -4,8 +4,8 @@
     .fingerprint = 0x496db1078714cc6,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
-        .publr_native = .{
-            .path = "../../native",
+        .platform = .{
+            .path = "../platform",
         },
     },
     .paths = .{

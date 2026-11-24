@@ -175,7 +175,7 @@ pub const Event = union(enum) {
     key_up: Key,
     modifiers: Mods,
     focus: bool,
-    /// The system switched between light and dark (`native.appearance()`).
+    /// The system switched between light and dark (`platform.appearance()`).
     appearance: Appearance,
     close,
 };

@@ -4,7 +4,7 @@
 //! its `--progress json` lines say how far it is.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const i18n = @import("i18n.zig");
 const translated = i18n.translated;
 
@@ -55,7 +55,7 @@ pub const Job = struct {
     shown: *const fn (job: *Job) void,
 
     pub fn start(self: *Job) !void {
-        try native.spawn(run, .{self});
+        try platform.spawn(run, .{self});
     }
 
     fn run(self: *Job) void {
@@ -66,7 +66,7 @@ pub const Job = struct {
             };
         };
         self.progress.stage.store(@backingInt(if (self.problem == null) Stage.done else Stage.failed), .release);
-        native.runOnMain(self, finish);
+        platform.runOnMain(self, finish);
     }
 
     fn finish(ctx: ?*anyopaque) callconv(.c) void {
@@ -127,7 +127,7 @@ pub const Job = struct {
             // The progress page, shown in the project's tab while the deploy goes on.
             if (std.mem.eql(u8, event.stage, "page") and event.url.len > 0 and self.page.len == 0) {
                 self.page = a.dupeSentinel(u8, event.url, 0) catch continue;
-                native.runOnMain(self, pageNamed);
+                platform.runOnMain(self, pageNamed);
                 continue;
             }
             const stage = std.meta.stringToEnum(Stage, event.stage) orelse continue;

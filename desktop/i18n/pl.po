@@ -1,4 +1,4 @@
-# Publr Desktop in Polish. Extract the source: zig run ../publr/scripts/i18n.zig -- src
+# Publr Desktop in Polish. Extract the source: zig run ../../publr/scripts/i18n.zig -- src
 msgid ""
 msgstr ""
 "Language: pl\n"

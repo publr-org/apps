@@ -2,12 +2,12 @@
 //! when they chose none. Words are marked where they are written, as Publr marks its own:
 //! `translated("Settings")`, `translated_in("verb", "Open")`,
 //! `translated_count("{count} project", "{count} projects", n)`; Publr's extractor
-//! (`zig run ../publr/scripts/i18n.zig -- src`) collects them for translators. Translations are
+//! (`zig run ../../publr/scripts/i18n.zig -- src`) collects them for translators. Translations are
 //! PO files, `i18n/<language>.po`, read with Publr's own catalogue. A word a file does not
 //! translate stays in English.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const catalog_module = @import("publr_i18n");
 
 /// What the person chose: the Mac's language, or one of Desktop's.
@@ -51,7 +51,7 @@ pub fn use(choice: Choice) void {
     spoken = "en";
     var buf: [64]u8 = undefined;
     const code = switch (choice) {
-        .system => base(native.preferredLanguage(&buf)),
+        .system => base(platform.preferredLanguage(&buf)),
         .en => "en",
         .pl => "pl",
     };

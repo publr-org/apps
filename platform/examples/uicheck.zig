@@ -4,11 +4,11 @@
 //! Headless: no window.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const ui_mod = @import("ui");
 const engine = @import("publr_engine");
 
-const c = native.gpu.c;
+const c = platform.gpu.c;
 const Ui = ui_mod.Ui;
 const hex = ui_mod.hex;
 const host = ui_mod.host;
@@ -233,7 +233,7 @@ fn gpuPixels(gpa: std.mem.Allocator, u: *Ui, device: c.WGPUDevice, tex: c.WGPUTe
 
 pub fn main() !void {
     const gpa = std.heap.c_allocator;
-    var gpu = try native.gpu.Gpu.init();
+    var gpu = try platform.gpu.Gpu.init();
     const u = try Ui.create(gpa);
     try u.attachGpu(&gpu, c.WGPUTextureFormat_RGBA8Unorm);
     var a = try thumbnail(gpa, 472, 280, .{ 230, 120, 80 });

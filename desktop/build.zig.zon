@@ -4,14 +4,14 @@
     .fingerprint = 0xc54d70692203a93,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
-        .native = .{
-            .path = "../native",
+        .platform = .{
+            .path = "../platform",
         },
         .publr_icons = .{
-            .path = "../icons",
+            .path = "../../icons",
         },
         .publr_cli = .{
-            .path = "../cli",
+            .path = "../../cli",
         },
     },
     .paths = .{

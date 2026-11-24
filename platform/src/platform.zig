@@ -8,7 +8,7 @@ const builtin = @import("builtin");
 const backend = switch (builtin.os.tag) {
     .macos => @import("macos/app.zig"),
     .wasi => @import("web/app.zig"),
-    else => @compileError("native: this platform is not supported yet"),
+    else => @compileError("platform: this platform is not supported yet"),
 };
 
 pub const event = @import("event.zig");
@@ -55,7 +55,7 @@ pub const activate = backend.activate;
 pub const keychain = switch (builtin.os.tag) {
     .macos => @import("macos/keychain.zig"),
     .wasi => @import("web/keychain.zig"),
-    else => @compileError("native: no keychain for this platform yet"),
+    else => @compileError("platform: no keychain for this platform yet"),
 };
 pub const setClipboardText = backend.setClipboardText;
 

@@ -23,8 +23,8 @@ pub fn build(b: *std.Build) void {
     for ([_][]const u8{ "Metal", "QuartzCore", "Foundation", "CoreGraphics", "IOSurface" }) |f| wgpu.linkFramework(f, .{});
 
     // The platform layer: app, windows, input, menus, frame timing, GPU surface, web view.
-    const native = b.addModule("native", .{
-        .root_source_file = b.path("src/native.zig"),
+    const platform = b.addModule("platform", .{
+        .root_source_file = b.path("src/platform.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -33,7 +33,7 @@ pub fn build(b: *std.Build) void {
             .module = wgpu,
         }},
     });
-    for ([_][]const u8{ "AppKit", "WebKit", "QuartzCore", "CoreGraphics", "Security" }) |f| native.linkFramework(f, .{});
+    for ([_][]const u8{ "AppKit", "WebKit", "QuartzCore", "CoreGraphics", "Security" }) |f| platform.linkFramework(f, .{});
 
     // Our own-drawn UI, on PublrEngine: boxes, text, icons, and their frame on a GPU surface.
     const engine = b.dependency("publr_engine", .{
@@ -46,8 +46,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{
-                .name = "native",
-                .module = native,
+                .name = "platform",
+                .module = platform,
             },
             .{
                 .name = "publr_engine",
@@ -68,7 +68,7 @@ pub fn build(b: *std.Build) void {
     const tidy = b.addExecutable(.{
         .name = "tidy",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("../publr/scripts/tidy.zig"),
+            .root_source_file = b.path("../../publr/scripts/tidy.zig"),
             .target = b.graph.host,
             .optimize = .debug,
         }),
@@ -89,8 +89,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{
-                    .name = "native",
-                    .module = native,
+                    .name = "platform",
+                    .module = platform,
                 },
                 .{
                     .name = "ui",
@@ -107,15 +107,15 @@ pub fn build(b: *std.Build) void {
 
     // `zig build demo`: a window with a GPU clear and input printed, to check the layer.
     const demo = b.addExecutable(.{
-        .name = "native-demo",
+        .name = "platform-demo",
         .root_module = b.createModule(.{
             .root_source_file = b.path("examples/demo.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
                 .{
-                    .name = "native",
-                    .module = native,
+                    .name = "platform",
+                    .module = platform,
                 },
                 .{
                     .name = "wgpu",
@@ -137,8 +137,8 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{
-                    .name = "native",
-                    .module = native,
+                    .name = "platform",
+                    .module = platform,
                 },
             },
         }),
@@ -148,10 +148,10 @@ pub fn build(b: *std.Build) void {
     b.step("webgpu", "Whether the web view gets WebGPU").dependOn(&run_webgpu.step);
 }
 
-/// The `native` and `ui` modules for a browser page.
+/// The `platform` and `ui` modules for a browser page.
 fn add_web(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.Optimize) void {
-    const native = b.addModule("native", .{
-        .root_source_file = b.path("src/native.zig"),
+    const platform = b.addModule("platform", .{
+        .root_source_file = b.path("src/platform.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -166,8 +166,8 @@ fn add_web(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builti
         .optimize = optimize,
         .imports = &.{
             .{
-                .name = "native",
-                .module = native,
+                .name = "platform",
+                .module = platform,
             },
             .{
                 .name = "publr_engine",

@@ -3,7 +3,7 @@
 //! the next start shows it at once. One site at a time; taken again at every start.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const ui = @import("ui");
 const engine = @import("publr_engine");
 
@@ -24,7 +24,7 @@ pub const Thumbs = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
     dir: []const u8,
-    web: *native.WebView,
+    web: *platform.WebView,
     ui: *ui.Ui,
     /// Sites waiting for a picture: name and address.
     queue: std.ArrayList(Job) = .empty,
@@ -37,7 +37,7 @@ pub const Thumbs = struct {
         address: [:0]const u8,
     };
 
-    pub fn init(gpa: std.mem.Allocator, io: std.Io, support_dir: []const u8, window: *native.Window, u: *ui.Ui, changed: *const fn () void) !Thumbs {
+    pub fn init(gpa: std.mem.Allocator, io: std.Io, support_dir: []const u8, window: *platform.Window, u: *ui.Ui, changed: *const fn () void) !Thumbs {
         const dir = try std.fs.path.join(gpa, &.{ support_dir, "thumbnails" });
         std.Io.Dir.cwd().createDirPath(io, dir) catch {};
         const web = try window.addWebView();
@@ -92,14 +92,14 @@ pub const Thumbs = struct {
     }
 
     /// A page message: true when it was this one's (the page loaded and painted).
-    pub fn onMessage(self: *Thumbs, web: *native.WebView, text: []const u8) bool {
+    pub fn onMessage(self: *Thumbs, web: *platform.WebView, text: []const u8) bool {
         if (web != self.web or !std.mem.eql(u8, text, ready_message)) return false;
         if (self.current == null) return true;
         self.web.snapshot(picture_width, self, taken);
         return true;
     }
 
-    fn taken(ctx: ?*anyopaque, pic: ?native.Picture) void {
+    fn taken(ctx: ?*anyopaque, pic: ?platform.Picture) void {
         const self: *Thumbs = @ptrCast(@alignCast(ctx));
         const job = self.current orelse return;
         defer {
@@ -127,7 +127,7 @@ pub const Thumbs = struct {
 
     /// The picture as a PNG at `<dir>/<name>.png`, on a thread of its own, which takes
     /// `pic.pixels` (the C allocator's, freed there).
-    fn save(self: *Thumbs, name: []const u8, pic: native.Picture) void {
+    fn save(self: *Thumbs, name: []const u8, pic: platform.Picture) void {
         const job = self.gpa.create(Save) catch return std.heap.c_allocator.free(pic.pixels);
         job.* = .{
             .gpa = self.gpa,
@@ -138,7 +138,7 @@ pub const Thumbs = struct {
             },
             .pic = pic,
         };
-        native.spawn(Save.run, .{job}) catch job.run();
+        platform.spawn(Save.run, .{job}) catch job.run();
     }
 };
 
@@ -146,7 +146,7 @@ const Save = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
     path: []const u8,
-    pic: native.Picture,
+    pic: platform.Picture,
 
     fn run(self: *Save) void {
         defer {

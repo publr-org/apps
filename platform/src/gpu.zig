@@ -50,7 +50,7 @@ pub const Gpu = struct {
 
         var dgot: Got(c.WGPUDevice) = .{};
         var desc = std.mem.zeroes(c.WGPUDeviceDescriptor);
-        desc.label = str("native");
+        desc.label = str("platform");
         desc.uncapturedErrorCallbackInfo = .{
             .nextInChain = null,
             .callback = uncapturedError,
@@ -99,7 +99,7 @@ pub const Gpu = struct {
                 };
                 desc.nextInChain = &metal.chain;
             },
-            else => @compileError("native: no GPU surface for this platform yet"),
+            else => @compileError("platform: no GPU surface for this platform yet"),
         }
         const s = c.wgpuInstanceCreateSurface(self.instance, &desc) orelse return error.NoSurface;
         var caps = std.mem.zeroes(c.WGPUSurfaceCapabilities);

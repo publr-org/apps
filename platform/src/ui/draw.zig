@@ -14,13 +14,13 @@
 //! children (with their places): a still or scrolled UI keeps nearly everything.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const engine = @import("publr_engine");
 const host_mod = @import("host.zig");
 const Ui = @import("ui.zig").Ui;
 const Color = @import("ui.zig").Color;
 
-const c = native.gpu.c;
+const c = platform.gpu.c;
 const m = engine.model;
 const Host = host_mod.Host;
 const Scene = engine.gpu_scene.Scene;
@@ -38,7 +38,7 @@ pub const Gpu = struct {
     scene_ms: f64 = 0,
     encode_ms: f64 = 0,
 
-    pub fn create(gpa: std.mem.Allocator, gpu: *native.gpu.Gpu, format: c.WGPUTextureFormat) !*Gpu {
+    pub fn create(gpa: std.mem.Allocator, gpu: *platform.gpu.Gpu, format: c.WGPUTextureFormat) !*Gpu {
         const self = try gpa.create(Gpu);
         self.* = .{
             .gpa = gpa,

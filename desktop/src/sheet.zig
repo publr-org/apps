@@ -4,7 +4,7 @@
 //! with the main button. Layout and hit testing together.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const ui = @import("ui");
 const Theme = @import("theme.zig").Theme;
 const i18n = @import("i18n.zig");
@@ -210,7 +210,7 @@ pub fn hit(given: State, u: *ui.Ui, x: f64, y: f64) Target {
     return .none;
 }
 
-pub fn draw(u: *ui.Ui, given: State, t: *const Theme, focus: ?usize, window: *native.Window) !void {
+pub fn draw(u: *ui.Ui, given: State, t: *const Theme, focus: ?usize, window: *platform.Window) !void {
     const s = measured(given, u);
     // The window dimmed behind it.
     try u.rect(.{

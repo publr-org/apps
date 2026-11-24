@@ -327,7 +327,7 @@ pub fn spawn(comptime function: anytype, args: anytype) !void {
             const result = @call(.auto, function, self.args);
 
             if (@typeInfo(@TypeOf(result)) == .error_union) {
-                _ = result catch |err| std.debug.print("native: background work: {t}\n", .{err});
+                _ = result catch |err| std.debug.print("platform: background work: {t}\n", .{err});
             }
         }
     };

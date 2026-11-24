@@ -1,22 +1,22 @@
 //! PublrDesign on macOS without a web view: a native window whose every pixel is drawn by
-//! PublrEngine on the GPU (`host.zig`, WebGPU through the `native` module). The platform
+//! PublrEngine on the GPU (`host.zig`, WebGPU through the `platform` module). The platform
 //! gives the window and the input events; the canvas and the outlines are Zig.
 //!
-//! `publr-design-native [doc.pubd-dir]` (default: the landing corpus). Scroll pans, pinch
+//! `publr-design [doc.pubd-dir]` (default: the landing corpus). Scroll pans, pinch
 //! or Cmd/Ctrl-scroll zooms, hover outlines a node, click selects it.
-//! `publr-design-native --gpucheck <doc.pubd-dir> [scale]`: every top-level node of every
+//! `publr-design --gpucheck <doc.pubd-dir> [scale]`: every top-level node of every
 //! page on the GPU against the CPU (`check.zig`).
-//! `publr-design-native --bench <doc.pubd-dir> [scale]`: frame times while the view moves.
+//! `publr-design --bench <doc.pubd-dir> [scale]`: frame times while the view moves.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const engine = @import("publr_engine");
 const Host = @import("ui").host.Host;
 const Overlay = @import("overlay.zig").Overlay;
 const doc = @import("doc.zig");
 const check = @import("check.zig");
 
-const c = native.gpu.c;
+const c = platform.gpu.c;
 const Box = engine.geom.Rect;
 const Timer = @import("ui").host.Timer;
 
@@ -40,11 +40,11 @@ const App = struct {
     gpa: std.mem.Allocator,
     session: *engine.session.Session,
     scene: engine.gpu_scene.Scene,
-    gpu: native.gpu.Gpu,
-    surface: native.gpu.Surface = undefined,
+    gpu: platform.gpu.Gpu,
+    surface: platform.gpu.Surface = undefined,
     host: *Host = undefined,
     overlay: Overlay = undefined,
-    window: *native.Window = undefined,
+    window: *platform.Window = undefined,
     view: View = .{},
     fitted: bool = false,
     dirty: bool = true,
@@ -66,21 +66,21 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len > 1 and std.mem.eql(u8, args[1], "--gpucheck")) return check.gpucheck(io, gpa, args[2..]);
     if (args.len > 1 and std.mem.eql(u8, args[1], "--bench")) return check.bench(io, gpa, args[2..]);
-    const dir = if (args.len > 1) args[1] else "../engine/corpus/landing/landing.pubd";
+    const dir = if (args.len > 1) args[1] else "../../publr-design/engine/corpus/landing/landing.pubd";
 
     const app = try gpa.create(App);
     app.* = .{
         .gpa = gpa,
         .session = try engine.session.Session.create(gpa),
         .scene = engine.gpu_scene.Scene.init(gpa),
-        .gpu = try native.gpu.Gpu.init(),
+        .gpu = try platform.gpu.Gpu.init(),
     };
     if (init.environ_map.get("SELF_TEST")) |v| app.self_test = if (std.mem.eql(u8, v, "stay")) .stay else .exit;
     try doc.open(io, gpa, app.session, dir);
     std.debug.print("{s}: {d} pages, page 0 has {d} frames\n", .{ dir, app.session.pages().len, app.session.pages()[0].children.len });
 
-    native.init("PublrDesign");
-    app.window = try native.Window.create(.{
+    platform.init("PublrDesign");
+    app.window = try platform.Window.create(.{
         .ctx = app,
         .on_event = onEvent,
     }, .{
@@ -91,10 +91,10 @@ pub fn main(init: std.process.Init) !void {
     app.surface = try app.gpu.surface(app.window);
     app.host = try Host.init(gpa, &app.gpu, app.surface.format);
     app.overlay = Overlay.init(gpa, app.gpu.device, app.gpu.queue, app.surface.format);
-    native.run();
+    platform.run();
 }
 
-fn onEvent(ctx: ?*anyopaque, win: *native.Window, event: native.Event) void {
+fn onEvent(ctx: ?*anyopaque, win: *platform.Window, event: platform.Event) void {
     const app: *App = @ptrCast(@alignCast(ctx));
     switch (event) {
         .frame => frame(app, win),
@@ -167,7 +167,7 @@ fn fitWidth(app: *App, width: f64) void {
 
 /// Every display refresh: a frame when something changed, CPU layers drawn in the time
 /// left, and a sharp frame once the zoom settles.
-fn frame(app: *App, win: *native.Window) void {
+fn frame(app: *App, win: *platform.Window) void {
     const size = win.size();
     const dev = win.scale();
     if (!app.fitted) {
@@ -197,7 +197,7 @@ fn frame(app: *App, win: *native.Window) void {
 }
 
 /// Draws a frame; false when the surface had no texture to give.
-fn draw(app: *App, win: *native.Window, w_pt: f64, h_pt: f64, dev: f64, moving: bool) !bool {
+fn draw(app: *App, win: *platform.Window, w_pt: f64, h_pt: f64, dev: f64, moving: bool) !bool {
     const w: u32 = @intFromFloat(@round(w_pt * dev));
     const h: u32 = @intFromFloat(@round(h_pt * dev));
     if (w == 0 or h == 0) return false;

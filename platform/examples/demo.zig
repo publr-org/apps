@@ -3,33 +3,33 @@
 //! after a few frames and says whether the GPU presented.
 
 const std = @import("std");
-const native = @import("native");
-const c = native.gpu.c;
+const platform = @import("platform");
+const c = platform.gpu.c;
 
-var gpu: native.gpu.Gpu = undefined;
-var surface: native.gpu.Surface = undefined;
+var gpu: platform.gpu.Gpu = undefined;
+var surface: platform.gpu.Surface = undefined;
 var hue: f64 = 0.6;
 var frames: u32 = 0;
 var exit_after = false;
 
 pub fn main(init: std.process.Init) !void {
     exit_after = init.environ_map.get("NATIVE_DEMO_EXIT") != null;
-    native.init("Native Demo");
-    gpu = try native.gpu.Gpu.init();
-    const win = try native.Window.create(.{
+    platform.init("Native Demo");
+    gpu = try platform.gpu.Gpu.init();
+    const win = try platform.Window.create(.{
         .on_event = onEvent,
     }, .{
-        .title = "native: GPU window",
+        .title = "platform: GPU window",
         .titlebar = .custom,
         .width = 640,
         .height = 420,
     });
     surface = try gpu.surface(win);
-    const web = try native.Window.create(.{
+    const web = try platform.Window.create(.{
         .on_event = onWebEvent,
         .on_message = onMessage,
     }, .{
-        .title = "native: web window",
+        .title = "platform: web window",
         .titlebar = .custom,
         .width = 720,
         .height = 360,
@@ -49,10 +49,10 @@ pub fn main(init: std.process.Init) !void {
     );
     // For screenshots of each window: `screencapture -o -l<number>`.
     std.debug.print("windows: gpu {d}, web {d}\n", .{ win.number(), web.number() });
-    native.run();
+    platform.run();
 }
 
-fn onEvent(_: ?*anyopaque, win: *native.Window, event: native.Event) void {
+fn onEvent(_: ?*anyopaque, win: *platform.Window, event: platform.Event) void {
     switch (event) {
         .frame => draw(win),
         .mouse_move => |m| hue = @mod(m.x / 640.0, 1.0),
@@ -69,13 +69,13 @@ fn onEvent(_: ?*anyopaque, win: *native.Window, event: native.Event) void {
     }
 }
 
-fn onWebEvent(_: ?*anyopaque, _: *native.Window, _: native.Event) void {}
+fn onWebEvent(_: ?*anyopaque, _: *platform.Window, _: platform.Event) void {}
 
-fn onMessage(_: ?*anyopaque, _: *native.WebView, text: []const u8) void {
+fn onMessage(_: ?*anyopaque, _: *platform.WebView, text: []const u8) void {
     std.debug.print("page says: {s}\n", .{text});
 }
 
-fn draw(win: *native.Window) void {
+fn draw(win: *platform.Window) void {
     const size = win.size();
     const s = win.scale();
     surface.configure(@intFromFloat(size.w * s), @intFromFloat(size.h * s));
@@ -106,6 +106,6 @@ fn draw(win: *native.Window) void {
     frames += 1;
     if (exit_after and frames == 120) {
         std.debug.print("demo: {d} frames presented at {d}x{d}\n", .{ frames, surface.width, surface.height });
-        native.quit();
+        platform.quit();
     }
 }

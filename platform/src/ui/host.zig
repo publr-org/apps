@@ -19,10 +19,10 @@
 //! garbage collector, this releases what a frame made once the frame is submitted.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const engine = @import("publr_engine");
 
-const c = native.gpu.c;
+const c = platform.gpu.c;
 const sc = engine.gpu_scene;
 const Scene = sc.Scene;
 const Session = engine.session.Session;
@@ -251,7 +251,7 @@ pub const Host = struct {
         size: u64,
     };
 
-    pub fn init(gpa: Allocator, gpu: *native.gpu.Gpu, format: c.WGPUTextureFormat) !*Host {
+    pub fn init(gpa: Allocator, gpu: *platform.gpu.Gpu, format: c.WGPUTextureFormat) !*Host {
         const device = gpu.device;
         var limits = std.mem.zeroes(c.WGPULimits);
         _ = c.wgpuDeviceGetLimits(device, &limits);
@@ -416,7 +416,7 @@ pub const Host = struct {
             var desc = std.mem.zeroes(c.WGPUComputePipelineDescriptor);
             desc.layout = fx_pl;
             desc.compute.module = fx_mod;
-            desc.compute.entryPoint = native.gpu.str(entry);
+            desc.compute.entryPoint = platform.gpu.str(entry);
             fx_pipelines[k] = c.wgpuDeviceCreateComputePipeline(device, &desc);
         }
 
@@ -1803,10 +1803,10 @@ pub fn beginPass(enc: c.WGPUCommandEncoder, v: c.WGPUTextureView, load: bool, va
 pub fn shaderModule(device: c.WGPUDevice, code: []const u8, label: []const u8) c.WGPUShaderModule {
     var wgsl = std.mem.zeroes(c.WGPUShaderSourceWGSL);
     wgsl.chain.sType = c.WGPUSType_ShaderSourceWGSL;
-    wgsl.code = native.gpu.str(code);
+    wgsl.code = platform.gpu.str(code);
     var desc = std.mem.zeroes(c.WGPUShaderModuleDescriptor);
     desc.nextInChain = &wgsl.chain;
-    desc.label = native.gpu.str(label);
+    desc.label = platform.gpu.str(label);
     return c.wgpuDeviceCreateShaderModule(device, &desc);
 }
 
@@ -1919,13 +1919,13 @@ pub fn renderPipeline(device: c.WGPUDevice, descriptor: PipelineDescriptor) c.WG
     target.writeMask = descriptor.write_mask;
     var frag = std.mem.zeroes(c.WGPUFragmentState);
     frag.module = descriptor.module;
-    frag.entryPoint = native.gpu.str(descriptor.fs);
+    frag.entryPoint = platform.gpu.str(descriptor.fs);
     frag.targetCount = 1;
     frag.targets = &target;
     var desc = std.mem.zeroes(c.WGPURenderPipelineDescriptor);
     desc.layout = descriptor.layout;
     desc.vertex.module = descriptor.module;
-    desc.vertex.entryPoint = native.gpu.str(descriptor.vs);
+    desc.vertex.entryPoint = platform.gpu.str(descriptor.vs);
     desc.vertex.bufferCount = descriptor.buffers.len;
     desc.vertex.buffers = descriptor.buffers.ptr;
     desc.primitive.topology = descriptor.topology;

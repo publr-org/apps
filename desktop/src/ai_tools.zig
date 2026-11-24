@@ -6,7 +6,7 @@
 //! shell, as Terminal would find it.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const i18n = @import("i18n.zig");
 const translated = i18n.translated;
 
@@ -143,7 +143,7 @@ pub const Tools = struct {
             .tools = self,
             .tool = tool,
         };
-        native.spawn(Job.run, .{job}) catch {
+        platform.spawn(Job.run, .{job}) catch {
             self.gpa.destroy(job);
             self.status[i] = .failed;
         };
@@ -167,7 +167,7 @@ pub const Tools = struct {
             \\}}
             \\
         , .{command}) catch return;
-        native.setClipboardText(text);
+        platform.setClipboardText(text);
     }
 
     /// The folder holding the tool's command, or null when it is not installed.
@@ -244,7 +244,7 @@ pub const Tools = struct {
         job.* = .{
             .tools = self,
         };
-        native.spawn(ShellJob.run, .{job}) catch {
+        platform.spawn(ShellJob.run, .{job}) catch {
             self.gpa.destroy(job);
             self.asking = false;
         };
@@ -257,7 +257,7 @@ const ShellJob = struct {
 
     fn run(self: *ShellJob) void {
         self.ask() catch |e| std.debug.print("desktop: asking the shell for AI tools: {t}\n", .{e});
-        native.runOnMain(self, finish);
+        platform.runOnMain(self, finish);
     }
 
     /// `command -v` for each command in an interactive login shell, which reads the same
@@ -316,7 +316,7 @@ const Job = struct {
 
     fn run(self: *Job) void {
         self.ok = self.setup() catch false;
-        native.runOnMain(self, finish);
+        platform.runOnMain(self, finish);
     }
 
     /// `publr setup <tool>`, with the tool's folder on the PATH: Desktop started from the

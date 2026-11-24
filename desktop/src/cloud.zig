@@ -5,7 +5,7 @@
 //! The calls are Cloud's (`cloud/docs/projects.md`, "Apps signed in to an account").
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const i18n = @import("i18n.zig");
 const translated = i18n.translated;
 
@@ -72,7 +72,7 @@ pub const Cloud = struct {
             .changed = changed,
         };
         // Signed in before: list with the kept token.
-        if (native.keychain.get(gpa, keychain_service, base)) |t| {
+        if (platform.keychain.get(gpa, keychain_service, base)) |t| {
             c.token = t;
             c.status = .signed_in;
         }
@@ -89,7 +89,7 @@ pub const Cloud = struct {
             .cloud = self,
             .token = self.gpa.dupe(u8, token) catch return,
         };
-        native.spawn(Job.list, .{job}) catch return;
+        platform.spawn(Job.list, .{job}) catch return;
     }
 
     /// Opens Cloud's sign-in in the browser; Desktop is signed in when the person allows it.
@@ -102,7 +102,7 @@ pub const Cloud = struct {
         job.* = .{
             .cloud = self,
         };
-        native.spawn(Job.signIn, .{job}) catch return;
+        platform.spawn(Job.signIn, .{job}) catch return;
     }
 
     /// Forgets the token here and signs it out on Cloud (listed under the account's apps).
@@ -119,7 +119,7 @@ pub const Cloud = struct {
                 .token = token,
             }) catch {};
         }
-        native.keychain.remove(keychain_service, self.base);
+        platform.keychain.remove(keychain_service, self.base);
         self.gpa.free(token);
         self.token = null;
         self.dropListing();
@@ -163,7 +163,7 @@ pub const Cloud = struct {
             .token = self.gpa.dupe(u8, token) catch return,
             .done = done,
         };
-        native.spawn(Create.run, .{job}) catch return;
+        platform.spawn(Create.run, .{job}) catch return;
     }
 
     /// Changes an app of the project `slug` on Cloud: `action` is `update` (`label` and `path`)
@@ -184,7 +184,7 @@ pub const Cloud = struct {
             .sent = sent,
             .done = done,
         };
-        native.spawn(ManageApp.run, .{job}) catch return;
+        platform.spawn(ManageApp.run, .{job}) catch return;
     }
 
     /// Signs in to the project `slug` as the member, as the dashboard's `/sign-on` does: `done`
@@ -201,7 +201,7 @@ pub const Cloud = struct {
             .token = self.gpa.dupe(u8, token) catch return,
             .done = done,
         };
-        native.spawn(SignOn.run, .{job}) catch return;
+        platform.spawn(SignOn.run, .{job}) catch return;
     }
 
     /// The dashboard page for the account's own settings (apps signed in, sign out).
@@ -240,7 +240,7 @@ const ManageApp = struct {
                 else => translated("Couldn\u{2019}t save the change. Check the name and path, then try again. Reserved paths such as /admin and /api cannot be used."),
             };
         } else |_| {}
-        native.runOnMain(self, finish);
+        platform.runOnMain(self, finish);
     }
 
     fn finish(ctx: ?*anyopaque) callconv(.c) void {
@@ -287,7 +287,7 @@ const Create = struct {
             .name = self.name,
             .slug = self.slug,
             .suffix = self.suffix,
-        }, .{}) catch return native.runOnMain(self, finish);
+        }, .{}) catch return platform.runOnMain(self, finish);
         if (request(self.cloud.io, a, self.cloud.base, .POST, "/api/cloud.create_project", .{
             .token = self.token,
             .payload = sent,
@@ -308,7 +308,7 @@ const Create = struct {
                 self.made.problem = answer.message orelse translated("Publr Cloud did not make the project.");
             }
         } else |_| {}
-        native.runOnMain(self, finish);
+        platform.runOnMain(self, finish);
     }
 
     fn finish(ctx: ?*anyopaque) callconv(.c) void {
@@ -356,7 +356,7 @@ const SignOn = struct {
         };
         const sent = std.json.Stringify.valueAlloc(a, .{
             .project = self.slug,
-        }, .{}) catch return native.runOnMain(self, finish);
+        }, .{}) catch return platform.runOnMain(self, finish);
         if (request(self.cloud.io, a, self.cloud.base, .POST, "/api/cloud.sign_on_token", .{
             .token = self.token,
             .payload = sent,
@@ -385,7 +385,7 @@ const SignOn = struct {
                 self.signed.problem = answer.message orelse translated("Publr Cloud did not sign you in to the project.");
             }
         } else |_| {}
-        native.runOnMain(self, finish);
+        platform.runOnMain(self, finish);
     }
 
     fn finish(ctx: ?*anyopaque) callconv(.c) void {
@@ -412,7 +412,7 @@ const Job = struct {
 
     fn list(self: *Job) void {
         self.fetch();
-        native.runOnMain(self, apply);
+        platform.runOnMain(self, apply);
     }
 
     fn fetch(self: *Job) void {
@@ -456,7 +456,7 @@ const Job = struct {
             break :blk null;
         };
         if (self.token != null) self.fetch();
-        native.runOnMain(self, apply);
+        platform.runOnMain(self, apply);
     }
 
     /// On the main thread: the cloud takes what the job found.
@@ -471,7 +471,7 @@ const Job = struct {
             if (self.token) |t| gpa.free(t);
             if (c.token) |t| gpa.free(t);
             c.token = null;
-            native.keychain.remove(keychain_service, c.base);
+            platform.keychain.remove(keychain_service, c.base);
             c.dropListing();
             c.status = .signed_out;
             return c.changed();
@@ -481,8 +481,8 @@ const Job = struct {
             if (c.token == null or !std.mem.eql(u8, c.token.?, t)) {
                 if (c.token) |old| gpa.free(old);
                 c.token = t;
-                _ = native.keychain.set(keychain_service, c.base, t);
-                native.activate();
+                _ = platform.keychain.set(keychain_service, c.base, t);
+                platform.activate();
             } else gpa.free(t);
         }
         if (self.listing) |l| {
@@ -536,7 +536,7 @@ fn authorize(c: *Cloud) ![]u8 {
         challenge,
         state,
     }, 0);
-    if (c.no_browser) std.debug.print("desktop: sign in at {s}\n", .{url}) else native.openInBrowser(url);
+    if (c.no_browser) std.debug.print("desktop: sign in at {s}\n", .{url}) else platform.openInBrowser(url);
 
     // The browser comes back once: the code, or the person's no.
     const code = try waitForCode(io, a, &listener, state);

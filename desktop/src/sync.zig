@@ -8,7 +8,7 @@
 //! Every decision is made on the main thread; a job only runs one command and hands back.
 
 const std = @import("std");
-const native = @import("native");
+const platform = @import("platform");
 const i18n = @import("i18n.zig");
 const translated = i18n.translated;
 
@@ -131,7 +131,7 @@ const Job = struct {
     why: []u8 = &.{},
     fn run(job: *Job) void {
         job.exec() catch |e| std.debug.print("desktop: sync {s} {t}: {t}\n", .{ job.name, job.command, e });
-        native.runOnMain(job, finish);
+        platform.runOnMain(job, finish);
     }
 
     fn exec(job: *Job) !void {
@@ -315,7 +315,7 @@ fn start(name: []const u8, command: Command, stop_first: bool, token: []const u8
         .stop_first = stop_first,
     };
     e.busy = true;
-    native.spawn(Job.run, .{job}) catch {
+    platform.spawn(Job.run, .{job}) catch {
         e.busy = false;
         return;
     };
@@ -332,10 +332,10 @@ const Where = struct {
 /// After a failure, Home drawn again once `recheck_ms` passed, which asks again: a failure
 /// is tried again even while nobody touches the window.
 fn retryLater() void {
-    native.spawn(struct {
+    platform.spawn(struct {
         fn wait() void {
             std.Io.sleep(shared.io, .fromMilliseconds(recheck_ms + 1000), .awake) catch return;
-            native.runOnMain(null, again);
+            platform.runOnMain(null, again);
         }
         fn again(_: ?*anyopaque) callconv(.c) void {
             shared.changed();
