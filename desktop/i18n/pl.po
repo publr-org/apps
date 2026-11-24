@@ -149,6 +149,9 @@ msgstr "W Cloud nie ma jeszcze projektów. Nowy projekt utworzy go tam."
 msgid "No projects in this space yet. New project makes one."
 msgstr "W tej przestrzeni nie ma jeszcze projektów. Utwórz go przyciskiem Nowy projekt."
 
+msgid "No projects in this folder yet."
+msgstr "W tym folderze nie ma jeszcze projektów."
+
 msgctxt "verb"
 msgid "Open"
 msgstr "Otwórz"

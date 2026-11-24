@@ -109,27 +109,56 @@ pub const Thumbs = struct {
             self.next();
         }
         const p = pic orelse return;
-        defer std.heap.c_allocator.free(p.pixels);
-        // Saved for the next start, then shown.
-        if (engine.png.encode(self.gpa, p.width, p.height, p.pixels)) |bytes| {
-            defer self.gpa.free(bytes);
-            var pb: [1024]u8 = undefined;
-            if (std.fmt.bufPrint(&pb, "{s}/{s}.png", .{ self.dir, job.name })) |path| {
-                std.Io.Dir.cwd().writeFile(self.io, .{
-                    .sub_path = path,
-                    .data = bytes,
-                }) catch {};
-            } else |_| {}
-        } else |_| {}
+        // Saved for the next start off the main thread (encoding a PNG takes long enough to
+        // stall the window, one picture after another at every start), shown here at once.
+        const shown = self.gpa.dupe(u8, p.pixels) catch null;
+        save(self, job.name, p);
         var img: engine.Image = .{
             .width = p.width,
             .height = p.height,
-            .pixels = self.gpa.dupe(u8, p.pixels) catch return,
+            .pixels = shown orelse return,
         };
         defer img.deinit(self.gpa);
         var kb: [256]u8 = undefined;
         const k = std.fmt.bufPrint(&kb, "thumb:{s}", .{job.name}) catch return;
         self.ui.setImage(k, &img) catch return;
         self.changed();
+    }
+
+    /// The picture as a PNG at `<dir>/<name>.png`, on a thread of its own, which takes
+    /// `pic.pixels` (the C allocator's, freed there).
+    fn save(self: *Thumbs, name: []const u8, pic: native.Picture) void {
+        const job = self.gpa.create(Save) catch return std.heap.c_allocator.free(pic.pixels);
+        job.* = .{
+            .gpa = self.gpa,
+            .io = self.io,
+            .path = std.fmt.allocPrint(self.gpa, "{s}/{s}.png", .{ self.dir, name }) catch {
+                self.gpa.destroy(job);
+                return std.heap.c_allocator.free(pic.pixels);
+            },
+            .pic = pic,
+        };
+        native.spawn(Save.run, .{job}) catch job.run();
+    }
+};
+
+const Save = struct {
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    path: []const u8,
+    pic: native.Picture,
+
+    fn run(self: *Save) void {
+        defer {
+            std.heap.c_allocator.free(self.pic.pixels);
+            self.gpa.free(self.path);
+            self.gpa.destroy(self);
+        }
+        const bytes = engine.png.encode(self.gpa, self.pic.width, self.pic.height, self.pic.pixels) catch return;
+        defer self.gpa.free(bytes);
+        std.Io.Dir.cwd().writeFile(self.io, .{
+            .sub_path = self.path,
+            .data = bytes,
+        }) catch {};
     }
 };

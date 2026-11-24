@@ -573,6 +573,12 @@ fn viewItems() []const home.Item {
             for (sites.list.items) |s| addLocal(a, s.name);
             groupItems(a);
         },
+        .folder => |i| {
+            const folders = folderList();
+            if (i < folders.len) for (sites.list.items) |s| {
+                if (std.mem.eql(u8, siteWhere(s), folder_paths[i])) addLocal(a, s.name);
+            };
+        },
         .cloud => {
             for (sites.list.items) |s| if (linkedProject(s) != null) addLocal(a, s.name);
             addUnlinked(a, null);
@@ -593,11 +599,42 @@ fn groupItems(a: std.mem.Allocator) void {
     for (items.items, item_refs.items) |*it, ref| switch (ref) {
         .local => |name| {
             const s = sites.find(name) orelse continue;
-            const where = if (std.mem.eql(u8, s.entry, s.folder)) std.fs.path.dirname(s.folder) orelse s.folder else s.entry;
-            it.group = shortFolder(a, where);
+            it.group = shortFolder(a, siteWhere(s));
         },
         .cloud => it.group = translated("On Cloud"),
     };
+}
+
+/// The folder a site on this Mac is in: its folder of sites, or the folder that holds a
+/// single site.
+fn siteWhere(s: @import("sites.zig").Site) []const u8 {
+    return if (std.mem.eql(u8, s.entry, s.folder)) std.fs.path.dirname(s.folder) orelse s.folder else s.entry;
+}
+
+var folder_list: [32]home.Space = undefined;
+/// The folders' full paths, beside `folder_list` (valid until the site list is read again).
+var folder_paths: [32][]const u8 = undefined;
+var folder_names: [32][1024]u8 = undefined;
+
+/// The folders sites on this Mac are in, in the list's order (the default one first), each
+/// with its count.
+fn folderList() []const home.Space {
+    var n: usize = 0;
+    outer: for (sites.list.items) |s| {
+        const where = siteWhere(s);
+        for (folder_paths[0..n], 0..) |p, k| if (std.mem.eql(u8, p, where)) {
+            folder_list[k].count += 1;
+            continue :outer;
+        };
+        if (n == folder_list.len) continue;
+        folder_paths[n] = where;
+        folder_list[n] = .{
+            .name = sites_module.shortPath(&folder_names[n], home_dir, where),
+            .count = 1,
+        };
+        n += 1;
+    }
+    return folder_list[0..n];
 }
 
 const ProjectAt = struct {
@@ -819,7 +856,15 @@ fn cloudChanged() void {
 
 fn homeState() home.State {
     const size = window.size();
+    // A folder no longer listed (or the only one left) falls back to On this Mac.
+    switch (view) {
+        .folder => |i| if (folderList().len < 2 or i >= folderList().len) {
+            view = .local;
+        },
+        else => {},
+    }
     const its = viewItems();
+    const folders = folderList();
     const counted = counts();
     var st: home.State = .{
         .top = bar.height,
@@ -832,6 +877,7 @@ fn homeState() home.State {
         .local_count = counted.local,
         .cloud_count = counted.cloud,
         .spaces = spaceList(),
+        .folders = folders,
         .account = switch (cloud.status) {
             .signed_out => .signed_out,
             .signing_in => .signing_in,
@@ -849,6 +895,7 @@ fn homeState() home.State {
             .recents => translated("Recent"),
             .all => translated("All projects"),
             .local => translated("On this Mac"),
+            .folder => |i| if (i < folders.len) folders[i].name else translated("On this Mac"),
             .cloud => translated("On Cloud"),
             .space => |i| if (i < cloud.spaces.len) cloud.spaces[i].name else translated("On Cloud"),
             .settings => translated("Settings"),
@@ -1141,14 +1188,15 @@ fn click(win: *native.Window, m: native.event.Mouse) void {
         },
         .bar => |b| switch (b) {
             .bar => if (m.clicks == 2) win.titlebarDoubleClick() else win.dragWindow(),
-            .home, .plus => showHome(),
+            .home => showHome(),
+            .plus => openNewSite(),
             .browser => if (active) |i| openInBrowser(tabs.items[i]),
             .tab => |i| showTab(i),
             .tab_close => |i| closeTab(i),
             .none => {},
         },
         .home => |t| clickHome(t, m),
-        .project => |t| if (active) |i| clickProject(i, t),
+        .project => |t| if (active) |i| clickProject(i, t, m.mods),
         .settings => |t| clickSettings(t),
     }
 }
@@ -1171,6 +1219,9 @@ fn clickHome(t: home.Target, m: native.event.Mouse) void {
         .recents => setView(.recents),
         .all => setView(.all),
         .local => setView(.local),
+        .folder => |i| setView(.{
+            .folder = i,
+        }),
         .cloud => setView(.cloud),
         .space => |i| setView(.{
             .space = i,
@@ -1189,6 +1240,10 @@ fn clickHome(t: home.Target, m: native.event.Mouse) void {
                     .x = @floatCast(m.x),
                     .y = @floatCast(m.y),
                 };
+            } else if (m.mods.command) switch (r) {
+                // Command-click: the site itself, in the browser, not its tab.
+                .local => |name| viewInBrowser(name),
+                .cloud => |c| actProject(c.space, c.project, Action.view_live),
             } else switch (r) {
                 .local => |name| openLocal(name),
                 .cloud => |c| openProject(c.space, c.project),
@@ -1787,6 +1842,42 @@ fn openLocal(name: []const u8) void {
     const s = sites.find(name) orelse return;
     openProjectTab(name, name, s.live, spaceOf(s.live));
 }
+
+/// A site on this Mac in the browser: a linked folder's live site; any other's own, started
+/// first when stopped (off the main thread, then back to it).
+fn viewInBrowser(name: []const u8) void {
+    const s = sites.find(name) orelse return;
+    rememberRecent(name);
+    var buf: [512]u8 = undefined;
+    if (s.live.len > 0) return native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.live}, 0) catch return);
+    if (s.running) return native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.address}, 0) catch return);
+    const job = gpa.create(ViewSite) catch return;
+    job.* = .{
+        .name = gpa.dupe(u8, name) catch return gpa.destroy(job),
+        .address = gpa.dupeSentinel(u8, s.address, 0) catch return gpa.destroy(job),
+    };
+    native.spawn(ViewSite.run, .{job}) catch return;
+}
+
+const ViewSite = struct {
+    name: []const u8,
+    address: [:0]const u8,
+
+    fn run(self: *ViewSite) void {
+        sites.start(self.name);
+        native.runOnMain(self, opened);
+    }
+
+    fn opened(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *ViewSite = @ptrCast(@alignCast(ctx));
+        defer gpa.destroy(self);
+        defer gpa.free(self.name);
+        defer gpa.free(self.address);
+        native.openInBrowser(self.address);
+        refreshSites();
+        redrawAll();
+    }
+};
 
 fn act(name: []const u8, tag: u32) void {
     const s = sites.find(name) orelse return;
@@ -2808,7 +2899,7 @@ fn projectPage(i: usize) project.State {
     };
 }
 
-fn clickProject(i: usize, target: project.Target) void {
+fn clickProject(i: usize, target: project.Target, mods: native.event.Mods) void {
     const t = tabs.items[i];
     const pt = t.project orelse return;
     const was_open = pt.menu_open;
@@ -2834,9 +2925,14 @@ fn clickProject(i: usize, target: project.Target) void {
         .advanced => pt.advanced = !pt.advanced,
         .choose_build => choosePublr(pt.folder, false),
         .use_pin => choosePublr(pt.folder, true),
-        .admin => goTo(i, .admin),
-        .site, .address => goTo(i, .site),
-        .app => |k| goTo(i, .{
+        // Command-click: the admin or the site in the browser, signed in, not in the tab.
+        .admin => if (mods.command) openPathInBrowser(t, "/admin", "") else goTo(i, .admin),
+        .site, .address => if (mods.command) openPathInBrowser(t, "/", "") else goTo(i, .site),
+        // Command-click: the app itself, in the browser, not in its tab.
+        .app => |k| if (mods.command and k < pt.apps.len) {
+            var buf: [2048]u8 = undefined;
+            native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{pt.apps[k].address}, 0) catch return);
+        } else goTo(i, .{
             .app = k,
         }),
         .callout => if (syncing.reviewOf(pt.folder) != null) openReview(pt.folder, pt.live) else syncing.send(pt.folder),
@@ -3245,11 +3341,24 @@ fn openInBrowser(t: Tab) void {
     }
     // A sign-on link is for one use: the admin itself instead.
     if (std.mem.startsWith(u8, path, "/auth/")) path = "/admin";
+    openPathInBrowser(t, path, address);
+}
+
+/// The tab's site at `path` (`/`, `/admin`) in the browser, signed in: through the command's
+/// link on this Mac, Cloud's one-time sign-on for a project there. `address` is what opens
+/// when Desktop is not signed in to Cloud (empty: the live site at `path`).
+fn openPathInBrowser(t: Tab, path: []const u8, address: []const u8) void {
     const pt = t.project orelse return sites.openInBrowser(t.name, path);
     if (pt.live.len == 0) return sites.openInBrowser(if (pt.folder.len > 0) pt.folder else t.name, path);
     if (cloud.token == null) {
         var buf: [2048]u8 = undefined;
-        return native.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{address}, 0) catch return);
+        const url = if (address.len > 0)
+            std.fmt.bufPrintSentinel(&buf, "{s}", .{address}, 0)
+        else if (std.mem.eql(u8, path, "/admin") and t.url != null)
+            std.fmt.bufPrintSentinel(&buf, "{s}", .{t.url.?}, 0)
+        else
+            std.fmt.bufPrintSentinel(&buf, "{s}{s}", .{ std.mem.trimEnd(u8, pt.live, "/"), path }, 0);
+        return native.openInBrowser(url catch return);
     }
     if (sign_on_return) |old| gpa.free(old);
     sign_on_return = gpa.dupe(u8, path) catch null;

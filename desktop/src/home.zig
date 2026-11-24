@@ -68,6 +68,8 @@ pub const View = union(enum) {
     cloud,
     /// One space's, listed when there are several.
     space: usize,
+    /// One folder's sites on this Mac, listed when there are several.
+    folder: usize,
     /// Not a filter: the Settings page beside the sidebar (`settings.zig` draws it).
     settings,
 };
@@ -114,6 +116,7 @@ pub const Target = union(enum) {
     local,
     cloud,
     space: usize,
+    folder: usize,
     settings,
     show_grid,
     show_list,
@@ -139,6 +142,9 @@ pub const State = struct {
     local_count: usize,
     cloud_count: usize,
     spaces: []const Space,
+    /// The folders sites on this Mac are in, as people read them (`~/Publr`), with their
+    /// counts.
+    folders: []const Space = &.{},
     account: Account,
     hover: Target,
     scroll: f32,
@@ -323,6 +329,7 @@ pub fn maxScroll(s: State) f32 {
         .local_count = s.local_count,
         .cloud_count = s.cloud_count,
         .spaces = s.spaces,
+        .folders = s.folders,
         .account = s.account,
         .hover = s.hover,
         .scroll = 0,
@@ -367,16 +374,29 @@ pub fn accountMenuBottom(s: State) f32 {
     return accountRect(s).y - 4;
 }
 
-/// The Cloud section's label, under Recent, All projects and On this Mac.
+/// Folders are filters of their own only when there are several.
+fn foldersListed(s: State) usize {
+    return if (s.folders.len > 1) s.folders.len else 0;
+}
+
+/// A folder's row, under On this Mac, set in.
+fn folderRect(s: State, i: usize) ui.Rect {
+    var r = navRect(s, 3 + i);
+    r.x += 16;
+    r.w -= 16;
+    return r;
+}
+
+/// The Cloud section's label, under Recent, All projects, On this Mac and its folders.
 fn cloudLabelRect(s: State) ui.Rect {
-    var r = navRect(s, 3);
+    var r = navRect(s, 3 + foldersListed(s));
     r.h = label_height;
     return r;
 }
 
 /// The Cloud section's rows: On Cloud, then each space when there are several.
 fn cloudRowRect(s: State, k: usize) ui.Rect {
-    var r = navRect(s, 3 + k);
+    var r = navRect(s, 3 + foldersListed(s) + k);
     r.y += label_height;
     return r;
 }
@@ -473,6 +493,9 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
         if (navRect(s, 0).contains(x, y)) return .recents;
         if (navRect(s, 1).contains(x, y)) return .all;
         if (navRect(s, 2).contains(x, y)) return .local;
+        for (0..foldersListed(s)) |i| {
+            if (folderRect(s, i).contains(x, y)) return .{ .folder = i };
+        }
         if (s.account == .signed_in) {
             if (cloudRowRect(s, 0).contains(x, y)) return .cloud;
             for (0..spacesListed(s)) |i| {
@@ -512,6 +535,7 @@ pub fn targetRect(s: State, u: *ui.Ui, t: Target) ?ui.Rect {
         .recents => navRect(s, 0),
         .all => navRect(s, 1),
         .local => navRect(s, 2),
+        .folder => |i| folderRect(s, i),
         .cloud => cloudRowRect(s, 0),
         .space => |i| spaceRect(s, i),
         .show_grid => layoutRect(s, .grid),
@@ -600,6 +624,14 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
     try navItem(u, t, navRect(s, 0), icons.clock_rewind, translated("Recent"), null, s.view == .recents, same(s.hover, .recents));
     try navItem(u, t, navRect(s, 1), icons.layout_grid, translated("All projects"), std.fmt.bufPrint(&all_buf, "{d}", .{s.all_count}) catch null, s.view == .all, same(s.hover, .all));
     try navItem(u, t, navRect(s, 2), icons.device_desktop, translated("On this Mac"), std.fmt.bufPrint(&buf, "{d}", .{s.local_count}) catch null, s.view == .local, same(s.hover, .local));
+    for (s.folders[0..foldersListed(s)], 0..) |f, i| {
+        var fb: [16]u8 = undefined;
+        const selected = switch (s.view) {
+            .folder => |k| k == i,
+            else => false,
+        };
+        try navItem(u, t, folderRect(s, i), icons.folder, f.name, std.fmt.bufPrint(&fb, "{d}", .{f.count}) catch null, selected, same(s.hover, .{ .folder = i }));
+    }
 
     const label = cloudLabelRect(s);
     try u.text(.{
@@ -870,6 +902,7 @@ fn drawContent(u: *ui.Ui, s: State, t: *const Theme) !void {
             .recents => translated("Projects you open show up here."),
             .all => translated("No projects yet. New project makes one."),
             .local => translated("No projects on this Mac yet. New project makes one."),
+            .folder => translated("No projects in this folder yet."),
             .cloud => translated("No projects on Cloud yet. New project makes one there."),
             .space => translated("No projects in this space yet. New project makes one."),
             .settings => "",
