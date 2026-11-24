@@ -1,0 +1,691 @@
+# Publr Desktop in Polish. Extract the source: zig run ../publr/scripts/i18n.zig -- src
+msgid ""
+msgstr ""
+"Language: pl\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Not on this Mac"
+msgstr "Nie ma na tym Macu"
+
+msgid "On this Mac, not connected"
+msgstr "Na tym Macu, niepodłączone"
+
+msgid "Connecting…"
+msgstr "Łączenie…"
+
+msgid "In Cursor, choose Install"
+msgstr "W Cursorze wybierz Install"
+
+msgid "Connected"
+msgstr "Podłączone"
+
+msgid "Couldn’t connect. Try again."
+msgstr "Nie udało się podłączyć. Spróbuj ponownie."
+
+msgid "Connect"
+msgstr "Podłącz"
+
+msgid "Open Cursor again"
+msgstr "Otwórz Cursora ponownie"
+
+msgid "Publr Cloud could not be reached."
+msgstr "Nie udało się połączyć z Publr Cloud."
+
+msgid "Publr Cloud did not make the project."
+msgstr "Publr Cloud nie utworzył projektu."
+
+msgid "Publr Cloud did not sign you in to the project."
+msgstr "Publr Cloud nie zalogował cię do projektu."
+
+msgid "Publr Cloud did not list your sites."
+msgstr "Publr Cloud nie pokazał twoich projektów."
+
+msgid "Publr Cloud answered something Desktop does not understand."
+msgstr "Publr Cloud odpowiedział czymś, czego Desktop nie rozumie."
+
+msgid "Sign-in was denied. Try again, or use Publr without Cloud."
+msgstr "Logowanie odrzucone. Spróbuj ponownie albo używaj Publr bez Cloud."
+
+msgid "Sign-in took too long. Try again."
+msgstr "Logowanie trwało zbyt długo. Spróbuj ponownie."
+
+msgid "Signing in to Publr Cloud did not work."
+msgstr "Nie udało się zalogować do Publr Cloud."
+
+msgid "Signed in to Publr Desktop"
+msgstr "Zalogowano w Publr Desktop"
+
+msgid "You can close this tab and go back to Desktop."
+msgstr "Możesz zamknąć tę kartę i wrócić do Desktop."
+
+msgid "Sign-in denied"
+msgstr "Logowanie odrzucone"
+
+msgid "Publr Desktop is still signed out. You can close this tab."
+msgstr "Publr Desktop nadal jest wylogowany. Możesz zamknąć tę kartę."
+
+msgid "Desktop ran out of memory."
+msgstr "Desktopowi zabrakło pamięci."
+
+msgid "The site could not be deployed."
+msgstr "Nie udało się wdrożyć projektu."
+
+msgid "That address was just taken. Pick another."
+msgstr "Ten adres właśnie został zajęty. Wybierz inny."
+
+msgid "That address cannot be used. Pick another."
+msgstr "Tego adresu nie można użyć. Wybierz inny."
+
+msgid "That space is not yours any more."
+msgstr "Ta przestrzeń nie jest już twoja."
+
+msgid "The upload was lost. Try again."
+msgstr "Wysyłanie zostało przerwane. Spróbuj ponownie."
+
+msgid "Publr Cloud could not read the packed site."
+msgstr "Publr Cloud nie odczytał spakowanego projektu."
+
+msgid "This site was made by a newer Publr than Publr Cloud runs."
+msgstr "Ten projekt powstał w nowszym Publr niż ten, na którym działa Publr Cloud."
+
+msgid "Verify your email address first (Publr Cloud sent you a link)."
+msgstr "Najpierw potwierdź adres e-mail (Publr Cloud wysłał ci link)."
+
+msgid "Publr Cloud cannot start sites right now. Try again in a moment."
+msgstr "Publr Cloud nie może teraz uruchamiać projektów. Spróbuj za chwilę."
+
+msgid "New project"
+msgstr "Nowy projekt"
+
+msgid "Recent"
+msgstr "Ostatnie"
+
+msgid "All projects"
+msgstr "Wszystkie projekty"
+
+msgid "On this Mac"
+msgstr "Na tym Macu"
+
+msgid "Cloud"
+msgstr "Cloud"
+
+msgid "On Cloud"
+msgstr "W Cloud"
+
+msgid "Sign in to see your Cloud projects"
+msgstr "Zaloguj się, by je zobaczyć"
+
+msgid "Settings"
+msgstr "Ustawienia"
+
+msgid "Sign in to Publr Cloud"
+msgstr "Zaloguj się do Publr Cloud"
+
+msgid "Signing in in your browser…"
+msgstr "Logowanie w przeglądarce…"
+
+msgid "Projects"
+msgstr "Projekty"
+
+msgid "{count} project"
+msgid_plural "{count} projects"
+msgstr[0] "{count} projekt"
+msgstr[1] "{count} projekty"
+msgstr[2] "{count} projektów"
+
+msgid "Projects you open show up here."
+msgstr "Tu pojawiają się otwierane projekty."
+
+msgid "No projects yet. New project makes one."
+msgstr "Nie ma jeszcze projektów. Utwórz go przyciskiem Nowy projekt."
+
+msgid "No projects on this Mac yet. New project makes one."
+msgstr "Na tym Macu nie ma jeszcze projektów. Utwórz go przyciskiem Nowy projekt."
+
+msgid "No projects on Cloud yet. New project makes one there."
+msgstr "W Cloud nie ma jeszcze projektów. Nowy projekt utworzy go tam."
+
+msgid "No projects in this space yet. New project makes one."
+msgstr "W tej przestrzeni nie ma jeszcze projektów. Utwórz go przyciskiem Nowy projekt."
+
+msgctxt "verb"
+msgid "Open"
+msgstr "Otwórz"
+
+msgid "Same as the Mac"
+msgstr "Tak jak na Macu"
+
+msgid "Settings…"
+msgstr "Ustawienia…"
+
+msgid "Home"
+msgstr "Start"
+
+msgid "Close Tab"
+msgstr "Zamknij kartę"
+
+msgid "Reload"
+msgstr "Odśwież"
+
+msgid "Open in Browser"
+msgstr "Otwórz w przeglądarce"
+
+msgid "Refresh Sites"
+msgstr "Odśwież projekty"
+
+msgid "Tab {number}"
+msgstr "Karta {number}"
+
+msgid "Running"
+msgstr "Działa"
+
+msgid "Stopped"
+msgstr "Zatrzymany"
+
+msgid "Preview"
+msgstr "Podgląd"
+
+msgid "Live"
+msgstr "Na żywo"
+
+msgid "Open"
+msgstr "Otwórz"
+
+msgid "View live site"
+msgstr "Zobacz stronę na żywo"
+
+msgid "Open in dashboard"
+msgstr "Otwórz w panelu Cloud"
+
+msgid "Open dashboard"
+msgstr "Otwórz panel Cloud"
+
+msgid "Sign out"
+msgstr "Wyloguj się"
+
+msgid "Send changes to Cloud"
+msgstr "Wyślij zmiany do Cloud"
+
+msgid "Open review"
+msgstr "Otwórz przegląd zmian"
+
+msgid "Open copy on this Mac"
+msgstr "Otwórz kopię na tym Macu"
+
+msgid "Show in Finder"
+msgstr "Pokaż w Finderze"
+
+msgid "Copy path"
+msgstr "Kopiuj ścieżkę"
+
+msgid "Remove from this Mac"
+msgstr "Usuń z tego Maca"
+
+msgid "View site"
+msgstr "Zobacz stronę"
+
+msgid "Deploy to Cloud"
+msgstr "Wdróż do Cloud"
+
+msgid "Stop"
+msgstr "Zatrzymaj"
+
+msgid "Start"
+msgstr "Uruchom"
+
+msgid "Move to Trash"
+msgstr "Przenieś do kosza"
+
+msgid "Email"
+msgstr "E-mail"
+
+msgid "Default account email"
+msgstr "Domyślny e-mail konta"
+
+msgid "Every project you make gets this account, so it opens with you signed in. Without one, each project asks you to make an account the first time you open its admin."
+msgstr "Każdy nowy projekt dostaje to konto, więc otwiera się z tobą zalogowanym. Bez niego każdy projekt poprosi o utworzenie konta przy pierwszym otwarciu panelu."
+
+msgid "How accounts work"
+msgstr "Jak działają konta"
+
+msgid "Save"
+msgstr "Zapisz"
+
+msgid "The setting could not be saved."
+msgstr "Nie udało się zapisać ustawienia."
+
+msgid "At most 40 characters."
+msgstr "Najwyżej 40 znaków."
+
+msgid "Start with a lowercase letter."
+msgstr "Zacznij od małej litery."
+
+msgid "Lowercase letters, numbers and dashes only."
+msgstr "Tylko małe litery, cyfry i myślniki."
+
+msgid "No dash at the end, and no two in a row."
+msgstr "Bez myślnika na końcu i bez dwóch pod rząd."
+
+msgid "A site with this name is on this Mac already."
+msgstr "Projekt o tej nazwie jest już na tym Macu."
+
+msgid "Not an email address."
+msgstr "To nie jest adres e-mail."
+
+msgid "Where"
+msgstr "Gdzie"
+
+msgid "Name"
+msgstr "Nazwa"
+
+msgid "Create project"
+msgstr "Utwórz projekt"
+
+msgid "In {space}."
+msgstr "W przestrzeni {space}."
+
+msgid "Checking…"
+msgstr "Sprawdzanie…"
+
+msgid "Address"
+msgstr "Adres"
+
+msgid "Deploy “{name}” to Publr Cloud"
+msgstr "Wdróż „{name}” do Publr Cloud"
+
+msgid "Deploy to Publr Cloud"
+msgstr "Wdróż do Publr Cloud"
+
+msgid "The site goes live at the address below. This Mac keeps it as its working copy. {space}"
+msgstr "Projekt będzie dostępny pod adresem poniżej. Ten Mac zachowa go jako kopię roboczą. {space}"
+
+msgid "Deploy"
+msgstr "Wdróż"
+
+msgid "Packing the site…"
+msgstr "Pakowanie projektu…"
+
+msgid "Uploading… {sent} of {total} MB"
+msgstr "Wysyłanie… {sent} z {total} MB"
+
+msgid "Uploading…"
+msgstr "Wysyłanie…"
+
+msgid "Starting it on Publr Cloud…"
+msgstr "Uruchamianie w Publr Cloud…"
+
+msgid "{name} is live"
+msgstr "{name} działa na żywo"
+
+msgid "At {address}. This Mac keeps the site as its working copy; a domain of your own can be connected in the dashboard."
+msgstr "Pod adresem {address}. Ten Mac zachowa projekt jako kopię roboczą; własną domenę podłączysz w panelu Cloud."
+
+msgid "Close"
+msgstr "Zamknij"
+
+msgid "Making the site…"
+msgstr "Tworzenie projektu…"
+
+msgid "At most 60 characters."
+msgstr "Najwyżej 60 znaków."
+
+msgid "Making the project…"
+msgstr "Tworzenie projektu…"
+
+msgid "The site could not be made. See Console for p's message."
+msgstr "Nie udało się utworzyć projektu. Szczegóły znajdziesz w Konsoli."
+
+msgid "Running on this Mac"
+msgstr "Działa na tym Macu"
+
+msgid "Live on Cloud"
+msgstr "Na żywo w Cloud"
+
+msgid "Starting the site…"
+msgstr "Uruchamianie projektu…"
+
+msgid "Clone failed"
+msgstr "Klonowanie nie powiodło się"
+
+msgid "Sign-in failed"
+msgstr "Logowanie nie powiodło się"
+
+msgid "Publr Desktop's language"
+msgstr "Język Publr Desktop"
+
+msgid "New projects' language"
+msgstr "Język nowych projektów"
+
+msgid "The language Publr Desktop speaks to you."
+msgstr "Język, w którym mówi do ciebie Publr Desktop."
+
+msgid "Every project you make starts in this language: its admin speaks it, and its first account too."
+msgstr "Każdy nowy projekt zaczyna w tym języku: mówi nim jego panel i jego pierwsze konto."
+
+msgid "Language"
+msgstr "Język"
+
+msgid "The settings could not be read."
+msgstr "Nie udało się odczytać ustawień."
+
+msgid "Not set"
+msgstr "Nie ustawiono"
+
+msgid "That is as many folders as Desktop lists."
+msgstr "Desktop nie pokaże więcej folderów."
+
+msgid "The settings could not be saved."
+msgstr "Nie udało się zapisać ustawień."
+
+msgid "Where new sites go"
+msgstr "Gdzie trafiają nowe projekty"
+
+msgid "A folder of sites, or a site's folder"
+msgstr "Folder z projektami albo folder projektu"
+
+msgid "Choosing a folder…"
+msgstr "Wybieranie folderu…"
+
+msgid "That Publr could not be used."
+msgstr "Nie można użyć tego Publr."
+
+msgid "Choose a publr binary"
+msgstr "Wybierz plik publr"
+
+msgid "Going back to each site's release…"
+msgstr "Powrót do wersji każdego projektu…"
+
+msgid "Choosing a Publr…"
+msgstr "Wybieranie Publr…"
+
+msgid "Clone to this Mac"
+msgstr "Sklonuj na tego Maca"
+
+msgid "Deploy to Cloud…"
+msgstr "Wdróż do Cloud…"
+
+msgid "Open in Cloud dashboard"
+msgstr "Otwórz w panelu Cloud"
+
+msgid "Open admin"
+msgstr "Otwórz panel"
+
+msgid "Cloning…"
+msgstr "Klonowanie…"
+
+msgid "Open in browser"
+msgstr "Otwórz w przeglądarce"
+
+msgid "Live address"
+msgstr "Adres na żywo"
+
+msgid "Cloud space"
+msgstr "Przestrzeń w Cloud"
+
+msgid "Copied"
+msgstr "Skopiowano"
+
+msgid "Choose build…"
+msgstr "Wybierz build…"
+
+msgid "Use pinned version"
+msgstr "Użyj przypiętej wersji"
+
+msgid "Use Publr {version}"
+msgstr "Użyj Publr {version}"
+
+msgid "Admin"
+msgstr "Panel"
+
+msgid "Send to Cloud"
+msgstr "Wyślij do Cloud"
+
+msgid "Changes not on Cloud"
+msgstr "Zmiany, których nie ma w Cloud"
+
+msgid "Waiting for review"
+msgstr "Czeka na przegląd"
+
+msgid "Can’t reach Cloud"
+msgstr "Brak połączenia z Cloud"
+
+msgid "Apps"
+msgstr "Aplikacje"
+
+msgid "No apps yet."
+msgstr "Nie ma jeszcze aplikacji."
+
+msgid "Open app"
+msgstr "Otwórz aplikację"
+
+msgid "Project details"
+msgstr "Szczegóły projektu"
+
+msgid "Advanced"
+msgstr "Zaawansowane"
+
+msgid "Build:"
+msgstr "Build:"
+
+msgid "Build (all projects):"
+msgstr "Build (wszystkie projekty):"
+
+msgid "Change…"
+msgstr "Zmień…"
+
+msgid "Remove"
+msgstr "Usuń"
+
+msgid "Add folder…"
+msgstr "Dodaj folder…"
+
+msgid "Back to default"
+msgstr "Przywróć domyślne"
+
+msgid "Where projects live on this Mac, and who new projects belong to."
+msgstr "Gdzie są projekty na tym Macu i do kogo należą nowe projekty."
+
+msgid "Folders"
+msgstr "Foldery"
+
+msgid "Default projects folder"
+msgstr "Domyślny folder projektów"
+
+msgid "Other locations"
+msgstr "Inne miejsca"
+
+msgid "No other folders."
+msgstr "Brak innych folderów."
+
+msgid "New projects"
+msgstr "Nowe projekty"
+
+msgid "AI tools"
+msgstr "Narzędzia AI"
+
+msgid "Connect the AI tool you use once, and it works with every project."
+msgstr "Podłącz swoje narzędzie AI raz, a zadziała z każdym projektem."
+
+msgid "Publr build"
+msgstr "Build Publr"
+
+msgid "All projects run this build:"
+msgstr "Wszystkie projekty używają tego buildu:"
+
+msgid "Default: each project runs the Publr version it was made with."
+msgstr "Domyślnie: każdy projekt używa wersji Publr, w której powstał."
+
+msgid "Projects switch when they next start. A project's own choice comes first."
+msgstr "Projekty przełączą się przy następnym uruchomieniu. Wybór samego projektu ma pierwszeństwo."
+
+msgid "Cancel"
+msgstr "Anuluj"
+
+msgid "Up to date"
+msgstr "Aktualny"
+
+msgid "Updating from Cloud…"
+msgstr "Aktualizowanie z Cloud…"
+
+msgid "Changes not on Cloud yet"
+msgstr "Zmiany jeszcze nie w Cloud"
+
+msgid "Sending to Cloud…"
+msgstr "Wysyłanie do Cloud…"
+
+msgid "Sent for review"
+msgstr "Wysłano do przeglądu"
+
+msgid "Signing in…"
+msgstr "Logowanie…"
+
+msgid "Couldn’t reach Cloud"
+msgstr "Brak połączenia z Cloud"
+
+msgid "One account everywhere"
+msgstr "Jedno konto wszędzie"
+
+msgid "Every project, on this Mac and online, opens with you signed in."
+msgstr "Każdy projekt, na tym Macu i online, otwiera się z tobą zalogowanym."
+
+msgid "Online in one click"
+msgstr "Online jednym kliknięciem"
+
+msgid "Put a project online and get its address in seconds."
+msgstr "Opublikuj projekt i dostań jego adres w kilka sekund."
+
+msgid "Your projects on any Mac"
+msgstr "Twoje projekty na każdym Macu"
+
+msgid "Bring a Cloud project down to this Mac and work on it here."
+msgstr "Pobierz projekt z Cloud na tego Maca i pracuj nad nim tutaj."
+
+msgid "Set up an account for every project"
+msgstr "Osobne konto w każdym projekcie"
+
+msgid "Each project asks you to make its admin account the first time you open it."
+msgstr "Każdy projekt poprosi o utworzenie konta administratora przy pierwszym otwarciu."
+
+msgid "One account for all projects"
+msgstr "Jedno konto we wszystkich projektach"
+
+msgid "Choose one email. Every project you make gets an account with it and opens with you signed in."
+msgstr "Wybierz jeden e-mail. Każdy nowy projekt dostanie z nim konto i otworzy się z tobą zalogowanym."
+
+msgid "How building with AI works"
+msgstr "Jak budować z AI"
+
+msgid "Welcome to Publr Desktop"
+msgstr "Witaj w Publr Desktop"
+
+msgid "Make websites and apps on your Mac, with the AI tool you already use."
+msgstr "Twórz strony i aplikacje na Macu, z narzędziem AI, którego już używasz."
+
+msgid "Without Publr Cloud"
+msgstr "Bez Publr Cloud"
+
+msgid "How should your projects' admin accounts be made?"
+msgstr "Jak mają powstawać konta administratora w projektach?"
+
+msgid "Every project you make gets an account with this email and opens with you signed in."
+msgstr "Każdy nowy projekt dostanie konto z tym e-mailem i otworzy się z tobą zalogowanym."
+
+msgid "Connect your AI tool"
+msgstr "Podłącz swoje narzędzie AI"
+
+msgid "Publr works inside the AI tool you use. Connect it once, for every project."
+msgstr "Publr działa w narzędziu AI, którego używasz. Podłącz je raz, dla każdego projektu."
+
+msgid "Use without Cloud"
+msgstr "Używaj bez Cloud"
+
+msgid "Back"
+msgstr "Wstecz"
+
+msgid "Next"
+msgstr "Dalej"
+
+msgid "Continue"
+msgstr "Dalej"
+
+msgid "Recommended"
+msgstr "Polecane"
+
+msgid "For the best experience, we recommend Publr Cloud. It's free forever, and no credit card is needed."
+msgstr "Najlepiej działa z Publr Cloud. Jest darmowy na zawsze i nie wymaga karty płatniczej."
+
+msgid "Waiting for your browser…"
+msgstr "Czekam na przeglądarkę…"
+
+msgid "Continue with Publr Cloud"
+msgstr "Kontynuuj z Publr Cloud"
+
+msgid "Other AI tool"
+msgstr "Inne narzędzie AI"
+
+msgid "Copied. Paste it into the tool’s MCP settings."
+msgstr "Skopiowano. Wklej to w ustawieniach MCP narzędzia."
+
+msgid "Add Publr to its MCP settings by hand."
+msgstr "Dodaj Publr ręcznie w jego ustawieniach MCP."
+
+msgid "Copy settings"
+msgstr "Kopiuj ustawienia"
+
+msgid "Project home"
+msgstr "Strona projektu"
+
+msgid "Another app already uses this path. Choose a different path."
+msgstr "Inna aplikacja używa już tej ścieżki. Wybierz inną."
+
+msgid "Couldn’t save the change. Check the name and path, then try again. Reserved paths such as /admin and /api cannot be used."
+msgstr "Nie udało się zapisać zmiany. Sprawdź nazwę i ścieżkę, i spróbuj ponownie. Zarezerwowanych ścieżek, takich jak /admin i /api, nie można użyć."
+
+msgid "App name"
+msgstr "Nazwa aplikacji"
+
+msgid "URL path"
+msgstr "Ścieżka URL"
+
+msgid "Changing the path changes the app’s address. Its content stays in place."
+msgstr "Zmiana ścieżki zmienia adres aplikacji. Jej treść zostaje na miejscu."
+
+msgid "Edit app"
+msgstr "Edytuj aplikację"
+
+msgid "Save app"
+msgstr "Zapisz aplikację"
+
+msgid "Remove {app}?"
+msgstr "Usunąć {app}?"
+
+msgid "The app will go offline. Its files are archived and its content is kept."
+msgstr "Aplikacja przestanie działać. Jej pliki trafią do archiwum, a treść zostanie zachowana."
+
+msgid "Remove app"
+msgstr "Usuń aplikację"
+
+msgid "Saving…"
+msgstr "Zapisywanie…"
+
+msgid "The change could not be saved."
+msgstr "Nie udało się zapisać zmiany."
+
+msgid "Project name"
+msgstr "Nazwa projektu"
+
+msgid "my-project"
+msgstr "moj-projekt"
+
+msgid "Also the folder’s name. Made from the name when left empty."
+msgstr "To także nazwa folderu. Puste powstaje z nazwy projektu."
+
+msgid "Give it a name. You can add apps once it’s made."
+msgstr "Nadaj mu nazwę. Aplikacje dodasz, gdy już powstanie."
+
+msgid "The six characters at the end keep every address unique. Made from the name when left empty."
+msgstr "Sześć znaków na końcu sprawia, że każdy adres jest unikalny. Puste powstaje z nazwy projektu."
+
+msgid "Edit"
+msgstr "Edytuj"

@@ -1,0 +1,22 @@
+.{
+    .name = .publr_desktop,
+    .version = "0.1.0",
+    .fingerprint = 0xc54d70692203a93,
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        .native = .{
+            .path = "../native",
+        },
+        .publr_icons = .{
+            .path = "../icons",
+        },
+        .publr_cli = .{
+            .path = "../cli",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

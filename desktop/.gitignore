@@ -1,0 +1,9 @@
+zig-out/
+.zig-cache/
+zig-pkg/
+.DS_Store
+
+# A site the publr command makes when run in this folder by mistake.
+data/
+src/data/
+dist/
