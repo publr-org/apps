@@ -14,6 +14,10 @@
             .url = "https://github.com/gfx-rs/wgpu-native/releases/download/v29.0.1.1/wgpu-macos-aarch64-release.zip",
             .hash = "N-V-__8AAAUNfQJBPHGd3KMhFvl4WLpzHDx9rFkwSf2rFVhr",
         },
+        .wgpu_macos_x86_64 = .{
+            .url = "https://github.com/gfx-rs/wgpu-native/releases/download/v29.0.1.1/wgpu-macos-x86_64-release.zip",
+            .hash = "N-V-__8AAFWheQIu8DV1xiTixrDsCJ0xr7-Ssy-XhEIkgx5u",
+        },
     },
     .paths = .{
         "build.zig",

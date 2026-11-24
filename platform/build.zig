@@ -10,8 +10,14 @@ pub fn build(b: *std.Build) void {
         return add_web(b, target, optimize);
     }
 
-    // wgpu-native: the WebGPU C API, prebuilt (fetched by build.zig.zon), linked statically.
-    const wgpu_pkg = b.lazyDependency("wgpu_macos_aarch64", .{}) orelse return;
+    // wgpu-native: the WebGPU C API, prebuilt for each CPU (fetched by build.zig.zon), linked
+    // statically.
+    const wgpu_name = switch (target.result.cpu.arch) {
+        .aarch64 => "wgpu_macos_aarch64",
+        .x86_64 => "wgpu_macos_x86_64",
+        else => @panic("wgpu-native: no build for this CPU"),
+    };
+    const wgpu_pkg = b.lazyDependency(wgpu_name, .{}) orelse return;
     const wgpu_c = b.addTranslateC(.{
         .root_source_file = b.path("src/wgpu.h"),
         .target = target,
