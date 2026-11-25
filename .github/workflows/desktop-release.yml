@@ -203,14 +203,43 @@ jobs:
           git tag "$TAG"
           git push origin "$TAG"
 
-      # The notes cover Desktop's own changes: from its previous release, not the other apps'.
+      # The notes as React writes its own: the version and its date as the title, the beta line,
+      # every change since the previous release with its commit, and the full changelog.
+      - name: Release notes
+        working-directory: apps
+        env: { BETA: "Publr Desktop is in beta: expect changes between releases." }
+        run: |
+          previous="$(git tag --list 'desktop-v*' --sort=-version:refname | grep -vx "$TAG" | head -1)"
+          changes() {
+            git log --reverse --no-merges --format='%h%x09%H%x09%s' "$previous..$TAG" -- "$@" |
+              while IFS="$(printf '\t')" read -r short long subject; do
+                case "$subject" in "Release v"*|"Desktop "[0-9]*|"Merge "*) continue ;; esac
+                echo "- $subject ([$short]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$long))"
+              done
+          }
+          {
+            printf '%s\n\n' "$BETA"
+            if [ -z "$previous" ]; then
+              echo "First release."
+            else
+              desktop="$(changes desktop .github)"
+              platform="$(changes platform)"
+              if [ -n "$desktop" ]; then platform="$(printf '%s\n' "$platform" | grep -vxF -e "$desktop" || true)"; fi
+              printf '## All changes\n\n'
+              if [ -n "$desktop" ]; then printf '### Publr Desktop\n\n%s\n\n' "$desktop"; fi
+              if [ -n "$platform" ]; then printf '### Platform\n\n%s\n\n' "$platform"; fi
+              echo "**Full changelog:** $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$previous...$TAG"
+            fi
+          } > "$RUNNER_TEMP/notes.md"
+          echo "$VERSION ($(date -u '+%B %-d, %Y'))" > "$RUNNER_TEMP/title.txt"
+          cat "$RUNNER_TEMP/title.txt" "$RUNNER_TEMP/notes.md"
+
       - name: Release
         working-directory: dist
         run: |
-          previous="$(git -C ../apps tag --list 'desktop-v*' --sort=-version:refname | grep -vx "$TAG" | head -1)"
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
-            ${previous:+--notes-start-tag "$previous"} \
-            --title "Publr Desktop $VERSION" Publr-Desktop-* workspace.txt SHA256SUMS SHA256SUMS.sig
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "$(cat "$RUNNER_TEMP/title.txt")" --notes-file "$RUNNER_TEMP/notes.md" \
+            Publr-Desktop-* workspace.txt SHA256SUMS SHA256SUMS.sig
 
       - name: Merge the release into main
         working-directory: apps
