@@ -702,7 +702,7 @@ fn addLocal(a: std.mem.Allocator, name: []const u8) void {
         .thumb = thumb,
         .badge = if (s.standing) |st| switch (st.state) {
             .local_only => .local_only,
-            .update_available, .behind_cloud => .update,
+            .update_available => .update,
             .up_to_date => .none,
         } else .none,
     }) catch return;
@@ -3136,7 +3136,7 @@ fn projectPage(i: usize) project.State {
     const standing = if (kind == .local) local.?.standing else null;
     const version_callout: project.Callout = if (standing) |st| switch (st.state) {
         .local_only => .local_only,
-        .update_available, .behind_cloud => .update_out,
+        .update_available => .update_out,
         .up_to_date => .none,
     } else .none;
     return .{
