@@ -2515,7 +2515,7 @@ const standings_every_ms: i64 = 60 * 60 * 1000;
 
 fn openUpgrade(name: []const u8) void {
     if (open_sheet == .upgrade and sheet_busy != null) return;
-    if (active != null) showHome();
+    // Opened where it was asked for: over the project's page, or over Home from a card.
     if (upgrade_site.len > 0) gpa.free(upgrade_site);
     upgrade_site = gpa.dupe(u8, name) catch return;
     if (upgrade_said.len > 0) gpa.free(upgrade_said);
