@@ -78,7 +78,6 @@ pub const Page = union(enum) {
 /// The rare things, in the "more" menu.
 pub const Rare = enum {
     clone,
-    local_copy,
     finder,
     copy_path,
     deploy,
@@ -90,11 +89,10 @@ pub const Rare = enum {
     fn label(r: Rare) []const u8 {
         return switch (r) {
             .clone => translated("Clone to this Mac"),
-            .local_copy => translated("Open copy on this Mac"),
             .finder => translated("Show in Finder"),
             .copy_path => translated("Copy path"),
-            .deploy => translated("Deploy to Cloud\u{2026}"),
-            .make_compatible => translated("Make Cloud compatible\u{2026}"),
+            .deploy => translated("Share on Cloud\u{2026}"),
+            .make_compatible => translated("Convert to regular build\u{2026}"),
             .dashboard => translated("Open in Cloud dashboard"),
             .remove => translated("Remove from this Mac"),
         };
@@ -103,7 +101,6 @@ pub const Rare = enum {
     fn icon(r: Rare) []const u8 {
         return switch (r) {
             .clone => icons.device_desktop,
-            .local_copy => icons.device_desktop,
             .finder => icons.folder,
             .copy_path => icons.copy,
             .deploy => icons.upload,
@@ -633,10 +630,6 @@ fn rareList(s: State, out: *[7]Rare) []const Rare {
     var n: usize = 0;
     if (s.kind == .cloud and !s.cloning) {
         out[n] = .clone;
-        n += 1;
-    }
-    if (s.kind == .both) {
-        out[n] = .local_copy;
         n += 1;
     }
     if (s.kind != .cloud) {
@@ -1203,7 +1196,7 @@ fn calloutLabel(c: Callout) []const u8 {
     return switch (c) {
         .unsent => translated("Send to Cloud"),
         .waiting => translated("Open review"),
-        .local_only => translated("Make Cloud compatible"),
+        .local_only => translated("Convert to regular build"),
         .update_out => translated("Update"),
         .failed, .none => "",
     };

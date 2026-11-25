@@ -55,6 +55,8 @@ pub const State = struct {
     version: []const u8,
     update_line: []const u8,
     update_button: []const u8,
+    /// Projects on this Mac update to the Publr Cloud runs by themselves.
+    projects_update: bool = true,
     /// Advanced is unfolded.
     advanced: bool,
     /// How far the page is scrolled, under its bar.
@@ -76,6 +78,7 @@ pub const Target = union(enum) {
     change_project_language,
     connect_tool: ai_tools.Tool,
     update,
+    projects_update,
     advanced,
     choose_publr,
     clear_publr,
@@ -190,8 +193,23 @@ fn updateButton(s: State, u: *ui.Ui) ?ui.Rect {
     return rowButton(u, updatesRow(s, u), s.update_button);
 }
 
+/// Whether projects on this Mac update by themselves, under Desktop's own updates.
+fn projectsRow(s: State, u: *ui.Ui) ui.Rect {
+    var r = updatesRow(s, u);
+    r.y += r.h + 8;
+    return r;
+}
+
+fn projectsLabel(s: State) []const u8 {
+    return if (s.projects_update) translated("Turn off") else translated("Turn on");
+}
+
+fn projectsButton(s: State, u: *ui.Ui) ui.Rect {
+    return rowButton(u, projectsRow(s, u), projectsLabel(s));
+}
+
 fn advancedRect(s: State, u: *ui.Ui) ui.Rect {
-    const last = updatesRow(s, u);
+    const last = projectsRow(s, u);
     const c = column(s);
     return .{
         .x = c.x - 8,
@@ -308,6 +326,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (rowButton(u, projectLanguageRow(s, u), changeLabel()).contains(x, y)) return .change_project_language;
     for (s.tools, 0..) |tool, i| if (toolButton(s, u, i)) |b| if (b.contains(x, y)) return .{ .connect_tool = tool.tool };
     if (updateButton(s, u)) |b| if (b.contains(x, y)) return .update;
+    if (projectsButton(s, u).contains(x, y)) return .projects_update;
     if (advancedRect(s, u).contains(x, y)) return .advanced;
     if (!s.advanced) return .none;
     if (chooseRect(s, u).contains(x, y)) return .choose_publr;
@@ -417,6 +436,7 @@ fn drawPage(u: *ui.Ui, s: State, t: *const Theme) !void {
     // Updates.
     try sectionTitle(u, t, c, updatesTitle(s, u), translated("Updates"));
     try drawUpdates(u, s, t);
+    try drawProjects(u, s, t);
 
     // Advanced, folded.
     const a = advancedRect(s, u);
@@ -510,6 +530,32 @@ fn drawUpdates(u: *ui.Ui, s: State, t: *const Theme) !void {
         .color = t.text2,
     });
     if (updateButton(s, u)) |b| try button(u, t, b, s.update_button, same(s.hover, .update), true);
+}
+
+/// "Projects on this Mac", whether they update by themselves, and the switch.
+fn drawProjects(u: *ui.Ui, s: State, t: *const Theme) !void {
+    const r = projectsRow(s, u);
+    const b = projectsButton(s, u);
+    try u.text(.{
+        .x = r.x,
+        .y = r.y + 8,
+        .w = r.w - b.w - 24,
+        .h = 18,
+    }, translated("Projects on this Mac"), .{
+        .size = 14,
+        .weight = 500,
+        .color = t.text,
+    });
+    try u.text(.{
+        .x = r.x,
+        .y = r.y + 27,
+        .w = r.w - b.w - 24,
+        .h = 16,
+    }, if (s.projects_update) translated("Update to the Publr Cloud runs by themselves, backed up first") else translated("Stay on the Publr they run until you update them"), .{
+        .size = 12,
+        .color = t.text2,
+    });
+    try button(u, t, b, projectsLabel(s), same(s.hover, .projects_update), true);
 }
 
 /// A tool: its name, how it stands, and Connect (or a tick once it is connected).

@@ -44,8 +44,8 @@ pub const Kind = enum {
     both,
 };
 
-/// A pill on a card: an update is out, or Cloud's Publr cannot open the project.
-pub const Badge = enum { none, update, local_only };
+/// A pill on a card: a development build of Publr made it, or its update failed.
+pub const Badge = enum { none, dev_build, update_failed };
 
 /// A project as Home shows it.
 pub const Item = struct {
@@ -75,6 +75,8 @@ pub const View = union(enum) {
     space: usize,
     /// One folder's sites on this Mac, listed when there are several.
     folder: usize,
+    /// Sites a development build of Publr made, listed when there are some.
+    dev,
     /// Not a filter: the Settings page beside the sidebar (`settings.zig` draws it).
     settings,
 };
@@ -122,6 +124,7 @@ pub const Target = union(enum) {
     cloud,
     space: usize,
     folder: usize,
+    dev,
     settings,
     show_grid,
     show_list,
@@ -146,6 +149,8 @@ pub const State = struct {
     all_count: usize,
     local_count: usize,
     cloud_count: usize,
+    /// Sites a development build made; their row shows only when there are some.
+    dev_count: usize = 0,
     spaces: []const Space,
     /// The folders sites on this Mac are in, as people read them (`~/Publr`), with their
     /// counts.
@@ -392,22 +397,22 @@ fn folderRect(s: State, i: usize) ui.Rect {
     return r;
 }
 
-/// The Cloud section's label, under Recent, All projects, On this Mac and its folders.
-fn cloudLabelRect(s: State) ui.Rect {
-    var r = navRect(s, 3 + foldersListed(s));
-    r.h = label_height;
-    return r;
+/// Shared on Cloud, under On this Mac and its folders.
+fn sharedRect(s: State) ui.Rect {
+    return navRect(s, 3 + foldersListed(s));
 }
 
-/// The Cloud section's rows: On Cloud, then each space when there are several.
-fn cloudRowRect(s: State, k: usize) ui.Rect {
-    var r = navRect(s, 3 + foldersListed(s) + k);
-    r.y += label_height;
-    return r;
-}
-
+/// A space's row, under Shared on Cloud, set in.
 fn spaceRect(s: State, i: usize) ui.Rect {
-    return cloudRowRect(s, 1 + i);
+    var r = navRect(s, 4 + foldersListed(s) + i);
+    r.x += 16;
+    r.w -= 16;
+    return r;
+}
+
+/// Dev builds, last, when there are some.
+fn devRect(s: State) ui.Rect {
+    return navRect(s, 4 + foldersListed(s) + spacesListed(s));
 }
 
 /// Spaces are filters of their own only when there are several.
@@ -501,12 +506,14 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
         for (0..foldersListed(s)) |i| {
             if (folderRect(s, i).contains(x, y)) return .{ .folder = i };
         }
+        // Signed out, Shared on Cloud signs in: there is nothing to show until then.
+        if (sharedRect(s).contains(x, y)) return if (s.account == .signed_in) .cloud else .sign_in;
         if (s.account == .signed_in) {
-            if (cloudRowRect(s, 0).contains(x, y)) return .cloud;
             for (0..spacesListed(s)) |i| {
                 if (spaceRect(s, i).contains(x, y)) return .{ .space = i };
             }
         }
+        if (s.dev_count > 0 and devRect(s).contains(x, y)) return .dev;
         return .none;
     }
     // The Settings page answers its own clicks.
@@ -541,7 +548,8 @@ pub fn targetRect(s: State, u: *ui.Ui, t: Target) ?ui.Rect {
         .all => navRect(s, 1),
         .local => navRect(s, 2),
         .folder => |i| folderRect(s, i),
-        .cloud => cloudRowRect(s, 0),
+        .cloud => sharedRect(s),
+        .dev => devRect(s),
         .space => |i| spaceRect(s, i),
         .show_grid => layoutRect(s, .grid),
         .show_list => layoutRect(s, .list),
@@ -638,41 +646,21 @@ fn drawSidebar(u: *ui.Ui, s: State, t: *const Theme) !void {
         try navItem(u, t, folderRect(s, i), icons.folder, f.name, std.fmt.bufPrint(&fb, "{d}", .{f.count}) catch null, selected, same(s.hover, .{ .folder = i }));
     }
 
-    const label = cloudLabelRect(s);
-    try u.text(.{
-        .x = label.x + 10,
-        .y = label.y + 20,
-        .w = label.w - 20,
-        .h = 16,
-    }, translated("Cloud"), .{
-        .size = 10,
-        .weight = 600,
-        .color = t.text2,
-        .tracking = 1,
-        .upper = true,
-    });
-    if (s.account == .signed_in) {
-        var on_cloud: [16]u8 = undefined;
-        try navItem(u, t, cloudRowRect(s, 0), icons.globe, translated("On Cloud"), std.fmt.bufPrint(&on_cloud, "{d}", .{s.cloud_count}) catch null, s.view == .cloud, same(s.hover, .cloud));
-        for (s.spaces[0..spacesListed(s)], 0..) |sp, i| {
-            var cb: [16]u8 = undefined;
-            const selected = switch (s.view) {
-                .space => |k| k == i,
-                else => false,
-            };
-            try navItem(u, t, spaceRect(s, i), icons.folder, sp.name, std.fmt.bufPrint(&cb, "{d}", .{sp.count}) catch null, selected, same(s.hover, .{ .space = i }));
-        }
-    } else {
-        const r = cloudRowRect(s, 0);
-        try u.text(.{
-            .x = r.x + 10,
-            .y = r.y,
-            .w = r.w - 20,
-            .h = r.h,
-        }, translated("Sign in to see your Cloud projects"), .{
-            .size = 12,
-            .color = t.text2,
-        });
+    // Shared on Cloud, its spaces when there are several; signed out it is a way to sign in.
+    var on_cloud: [16]u8 = undefined;
+    const signed_in = s.account == .signed_in;
+    try navItem(u, t, sharedRect(s), icons.globe, translated("Shared on Cloud"), if (signed_in) std.fmt.bufPrint(&on_cloud, "{d}", .{s.cloud_count}) catch null else null, s.view == .cloud, same(s.hover, .cloud) or (!signed_in and same(s.hover, .sign_in)));
+    if (signed_in) for (s.spaces[0..spacesListed(s)], 0..) |sp, i| {
+        var cb: [16]u8 = undefined;
+        const selected = switch (s.view) {
+            .space => |k| k == i,
+            else => false,
+        };
+        try navItem(u, t, spaceRect(s, i), icons.folder, sp.name, std.fmt.bufPrint(&cb, "{d}", .{sp.count}) catch null, selected, same(s.hover, .{ .space = i }));
+    };
+    if (s.dev_count > 0) {
+        var db: [16]u8 = undefined;
+        try navItem(u, t, devRect(s), icons.code, translated("Dev builds"), std.fmt.bufPrint(&db, "{d}", .{s.dev_count}) catch null, s.view == .dev, same(s.hover, .dev));
     }
     try navItem(u, t, settingsRect(s), icons.settings, translated("Settings"), null, s.view == .settings, same(s.hover, .settings));
     try drawAccount(u, s, t);
@@ -907,8 +895,9 @@ fn drawContent(u: *ui.Ui, s: State, t: *const Theme) !void {
             .recents => translated("Projects you open show up here."),
             .all => translated("No projects yet. New project makes one."),
             .local => translated("No projects on this Mac yet. New project makes one."),
+            .dev => "",
             .folder => translated("No projects in this folder yet."),
-            .cloud => translated("No projects on Cloud yet. New project makes one there."),
+            .cloud => translated("Nothing shared on Cloud yet. Share on Cloud, from a project's menu, puts one there."),
             .space => translated("No projects in this space yet. New project makes one."),
             .settings => "",
         };
@@ -969,8 +958,8 @@ const pill_text: ui.TextStyle = .{
 fn pillLabel(badge: Badge) []const u8 {
     return switch (badge) {
         .none => "",
-        .update => translated("Update"),
-        .local_only => translated("Local only"),
+        .dev_build => translated("Dev build"),
+        .update_failed => translated("Update failed"),
     };
 }
 
@@ -978,7 +967,7 @@ pub fn pillWidth(u: *ui.Ui, badge: Badge) f32 {
     return if (badge == .none) 0 else u.measure(pillLabel(badge), pill_text) + 16;
 }
 
-/// The badge as a pill at `x`, `y`: red for local only, amber for an update.
+/// The badge as a pill at `x`, `y`: neutral for a dev build, red for a failed update.
 pub fn drawPill(u: *ui.Ui, t: *const Theme, x: f32, y: f32, badge: Badge) !void {
     if (badge == .none) return;
     const r: ui.Rect = .{
@@ -988,13 +977,14 @@ pub fn drawPill(u: *ui.Ui, t: *const Theme, x: f32, y: f32, badge: Badge) !void 
         .h = pill_height,
     };
     try u.box(r, .{
-        .fill = if (badge == .local_only) t.danger else t.preview,
+        .fill = if (badge == .update_failed) t.danger else t.text,
         .radius = pill_height / 2,
     });
     try u.text(r, pillLabel(badge), .{
         .size = pill_text.size,
         .weight = pill_text.weight,
-        .color = pill_text.color,
+        .color = if (badge == .update_failed) pill_text.color else t.bg,
+        .upper = true,
         .@"align" = .center,
     });
 }
@@ -1005,7 +995,8 @@ fn marksOf(kind: Kind) []const []const u8 {
     return switch (kind) {
         .local => &.{icons.device_desktop},
         .cloud => &.{icons.globe},
-        .both => &.{ icons.globe, icons.device_desktop },
+        // Shared: the Cloud site is the site, whether or not this Mac holds a copy.
+        .both => &.{icons.globe},
     };
 }
 

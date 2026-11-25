@@ -758,3 +758,63 @@ msgstr "Zaktualizuj do Publr {version}"
 
 msgid "Update"
 msgstr "Aktualizuj"
+
+msgid "Convert {site} to a regular build"
+msgstr "Przekształć {site} w zwykłą wersję"
+
+msgid "Convert to regular build"
+msgstr "Przekształć w zwykłą wersję"
+
+msgid "Convert to regular build…"
+msgstr "Przekształć w zwykłą wersję…"
+
+msgid "Convert"
+msgstr "Przekształć"
+
+msgid "Dev build"
+msgstr "Wersja deweloperska"
+
+msgid "Dev builds"
+msgstr "Wersje deweloperskie"
+
+msgid "Nothing shared on Cloud yet. Share on Cloud, from a project's menu, puts one there."
+msgstr "Nic nie jest jeszcze udostępnione w Cloud. Udostępnij w Cloud, z menu projektu, umieści go tam."
+
+msgid "Projects on this Mac"
+msgstr "Projekty na tym Macu"
+
+msgid "Remove copy from this Mac"
+msgstr "Usuń kopię z tego Maca"
+
+msgid "Review waiting"
+msgstr "Czeka na przegląd"
+
+msgid "Share “{name}” on Publr Cloud"
+msgstr "Udostępnij „{name}” w Publr Cloud"
+
+msgid "Share on Cloud…"
+msgstr "Udostępnij w Cloud…"
+
+msgid "Share on Publr Cloud"
+msgstr "Udostępnij w Publr Cloud"
+
+msgid "Share"
+msgstr "Udostępnij"
+
+msgid "Shared on Cloud"
+msgstr "Udostępnione w Cloud"
+
+msgid "Stay on the Publr they run until you update them"
+msgstr "Zostają na swojej wersji Publr, dopóki ich nie zaktualizujesz"
+
+msgid "Turn off"
+msgstr "Wyłącz"
+
+msgid "Turn on"
+msgstr "Włącz"
+
+msgid "Update failed"
+msgstr "Aktualizacja nieudana"
+
+msgid "Update to the Publr Cloud runs by themselves, backed up first"
+msgstr "Same aktualizują się do wersji Publr z Cloud, po zrobieniu kopii zapasowej"

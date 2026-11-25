@@ -577,18 +577,20 @@ fn viewItems() []const home.Item {
             addUnlinked(a, null);
             groupItems(a);
         },
+        // On this Mac: sites no one else sees. A shared site's copy is the shared site's.
         .local => {
-            for (sites.list.items) |s| addLocal(a, s.name);
+            for (sites.list.items) |s| if (s.live.len == 0) addLocal(a, s.name);
             groupItems(a);
         },
         .folder => |i| {
             const folders = folderList();
             if (i < folders.len) for (sites.list.items) |s| {
-                if (std.mem.eql(u8, siteWhere(s), folder_paths[i])) addLocal(a, s.name);
+                if (s.live.len == 0 and std.mem.eql(u8, siteWhere(s), folder_paths[i])) addLocal(a, s.name);
             };
         },
+        .dev => for (sites.list.items) |s| if (isDevBuild(s)) addLocal(a, s.name),
         .cloud => {
-            for (sites.list.items) |s| if (linkedProject(s) != null) addLocal(a, s.name);
+            for (sites.list.items) |s| if (s.live.len > 0) addLocal(a, s.name);
             addUnlinked(a, null);
         },
         .space => |i| {
@@ -607,11 +609,29 @@ fn groupItems(a: std.mem.Allocator) void {
     for (items.items, item_refs.items) |*it, ref| switch (ref) {
         .local => |name| {
             const s = sites.find(name) orelse continue;
-            it.group = shortFolder(a, siteWhere(s));
+            it.group = if (s.live.len > 0) translated("Shared on Cloud") else shortFolder(a, siteWhere(s));
         },
-        .cloud => it.group = translated("On Cloud"),
+        .cloud => it.group = translated("Shared on Cloud"),
     };
 }
+
+/// A site a development build of Publr made: Cloud's Publr cannot open it until it is
+/// converted to a regular build.
+fn isDevBuild(s: @import("sites.zig").Site) bool {
+    const st = s.standing orelse return false;
+    return s.live.len == 0 and st.state == .local_only;
+}
+
+/// A shared site's card line: its address, or what needs the person (a review waiting, a
+/// failure). Its copy on this Mac follows Cloud by itself and is not spoken of.
+fn sharedDetail(s: @import("sites.zig").Site, state: syncing.State, buf: []u8) []const u8 {
+    if (state == .waiting and syncing.reviewOf(s.name) != null) return translated("Review waiting");
+    if (state == .failed) return syncing.labelOf(s.name, state, buf);
+    return hostOf(s.live);
+}
+
+/// Sites whose update failed, with why: their card says so until one succeeds.
+var update_failed: std.StringHashMapUnmanaged([]const u8) = .empty;
 
 /// The folder a site on this Mac is in: its folder of sites, or the folder that holds a
 /// single site.
@@ -629,6 +649,7 @@ var folder_names: [32][1024]u8 = undefined;
 fn folderList() []const home.Space {
     var n: usize = 0;
     outer: for (sites.list.items) |s| {
+        if (s.live.len > 0) continue;
         const where = siteWhere(s);
         for (folder_paths[0..n], 0..) |p, k| if (std.mem.eql(u8, p, where)) {
             folder_list[k].count += 1;
@@ -690,7 +711,7 @@ fn addLocal(a: std.mem.Allocator, name: []const u8) void {
         state = syncing.stateOf(s.name) orelse .checking;
     }
     const label_buf = a.alloc(u8, 128) catch return;
-    const detail = if (linked) syncing.labelOf(s.name, state, label_buf) else if (s.running) translated("Running") else translated("Stopped");
+    const detail = if (linked) sharedDetail(s, state, label_buf) else if (s.running) translated("Running") else translated("Stopped");
     var kb: [256]u8 = undefined;
     const thumb = if (thumbs.key(&kb, s.name)) |k| a.dupe(u8, k) catch null else null;
     items.append(gpa, .{
@@ -698,13 +719,9 @@ fn addLocal(a: std.mem.Allocator, name: []const u8) void {
         .detail = detail,
         .kind = if (linked) .both else .local,
         .running = if (linked) state != .failed else s.running,
-        .changed = linked and (state == .unsent or state == .waiting),
+        .changed = linked and state == .waiting and syncing.reviewOf(s.name) != null,
         .thumb = thumb,
-        .badge = if (s.standing) |st| switch (st.state) {
-            .local_only => .local_only,
-            .update_available => .update,
-            .up_to_date => .none,
-        } else .none,
+        .badge = if (update_failed.get(s.name) != null) .update_failed else if (isDevBuild(s)) .dev_build else .none,
     }) catch return;
     item_refs.append(gpa, .{
         .local = intern(s.name),
@@ -788,7 +805,14 @@ fn counts() struct {
     all: usize,
     local: usize,
     cloud: usize,
+    dev: usize,
 } {
+    var mine: usize = 0;
+    var dev: usize = 0;
+    for (sites.list.items) |s| {
+        if (s.live.len == 0) mine += 1;
+        if (isDevBuild(s)) dev += 1;
+    }
     var unlinked: usize = 0;
     var on_cloud: usize = 0;
     for (cloud.spaces) |sp| for (sp.projects) |p| {
@@ -797,8 +821,9 @@ fn counts() struct {
     };
     return .{
         .all = sites.list.items.len + unlinked,
-        .local = sites.list.items.len,
+        .local = mine,
         .cloud = on_cloud,
+        .dev = dev,
     };
 }
 
@@ -892,6 +917,7 @@ fn homeState() home.State {
         .items = its,
         .all_count = counted.all,
         .local_count = counted.local,
+        .dev_count = counted.dev,
         .cloud_count = counted.cloud,
         .spaces = spaceList(),
         .folders = folders,
@@ -913,7 +939,8 @@ fn homeState() home.State {
             .all => translated("All projects"),
             .local => translated("On this Mac"),
             .folder => |i| if (i < folders.len) folders[i].name else translated("On this Mac"),
-            .cloud => translated("On Cloud"),
+            .cloud => translated("Shared on Cloud"),
+            .dev => translated("Dev builds"),
             .space => |i| if (i < cloud.spaces.len) cloud.spaces[i].name else translated("On Cloud"),
             .settings => translated("Settings"),
         },
@@ -997,32 +1024,22 @@ var menu_items: [12]home.MenuItem = undefined;
 fn siteMenu(name: []const u8) []const home.MenuItem {
     const s = sites.find(name) orelse return &.{};
     if (s.live.len > 0) {
-        // Linked: the Cloud project is the site; this folder is its working copy, kept in
-        // step by Desktop. Work made here goes up when the person sends it.
-        const state = syncing.stateOf(name) orelse .checking;
-        const linked = [_]home.MenuItem{
+        // Shared: the Cloud site is the site and is worked on there; this folder is a copy for
+        // agents, kept equal to Cloud by Desktop. People never send anything from it.
+        var n: usize = 0;
+        for ([_]?home.MenuItem{
             .{
                 .title = translated("Open"),
                 .tag = Action.open,
             },
             .{
-                .title = translated("Send changes to Cloud"),
-                .tag = Action.send_changes,
-                .enabled = state == .unsent,
-            },
-            .{
-                .title = translated("Open review"),
-                .tag = Action.open_review,
-                .enabled = syncing.reviewOf(name) != null,
-            },
-            .{
-                .title = translated("Open copy on this Mac"),
-                .tag = Action.preview_changes,
-            },
-            .{
-                .title = translated("View live site"),
+                .title = translated("View site"),
                 .tag = Action.view_live_local,
             },
+            if (syncing.reviewOf(name) != null) .{
+                .title = translated("Open review"),
+                .tag = Action.open_review,
+            } else null,
             .{
                 .separator = true,
             },
@@ -1038,19 +1055,18 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
                 .separator = true,
             },
             .{
-                .title = translated("Remove from this Mac"),
+                .title = translated("Remove copy from this Mac"),
                 .tag = Action.trash,
             },
+        }) |item| if (item) |it| {
+            menu_items[n] = it;
+            n += 1;
         };
-        @memcpy(menu_items[0..linked.len], &linked);
-        return menu_items[0..linked.len];
+        return menu_items[0..n];
     }
-    // A site Cloud's Publr cannot open is made Cloud compatible where Deploy would be; a
-    // release behind Cloud's has its update offered beside Deploy.
-    const state = if (s.standing) |st| st.state else .up_to_date;
-    const update_title = if (s.standing) |st| filled(frame_arena.allocator(), translated("Update to Publr {version}"), .{
-        .version = st.cloud,
-    }) catch "" else "";
+    // A dev build is converted to a regular build where Share on Cloud would be; a site on
+    // this Mac updates by itself, so no update is offered.
+    const dev = isDevBuild(s);
     var n: usize = 0;
     for ([_]?home.MenuItem{
         .{
@@ -1061,17 +1077,13 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
             .title = translated("View site"),
             .tag = Action.view_site,
         },
-        if (state == .local_only) .{
-            .title = translated("Make Cloud compatible\u{2026}"),
+        if (dev) .{
+            .title = translated("Convert to regular build\u{2026}"),
             .tag = Action.upgrade,
         } else .{
-            .title = translated("Deploy to Cloud"),
+            .title = translated("Share on Cloud\u{2026}"),
             .tag = Action.deploy,
         },
-        if (state == .update_available) .{
-            .title = update_title,
-            .tag = Action.upgrade,
-        } else null,
         .{
             .separator = true,
         },
@@ -1252,6 +1264,7 @@ fn clickHome(t: home.Target, m: platform.event.Mouse) void {
         .recents => setView(.recents),
         .all => setView(.all),
         .local => setView(.local),
+        .dev => setView(.dev),
         .folder => |i| setView(.{
             .folder = i,
         }),
@@ -2664,7 +2677,7 @@ fn upgradeState() sheet.State {
     const standing = if (sites.find(upgrade_site)) |s| s.standing else null;
     const local_only = standing != null and standing.?.state == .local_only;
     const to = if (standing) |st| st.cloud else "";
-    const title = if (local_only) filled(a, translated("Make {site} Cloud compatible"), .{
+    const title = if (local_only) filled(a, translated("Convert {site} to a regular build"), .{
         .site = upgrade_site,
     }) catch "" else filled(a, translated("Update {site} to Publr {version}"), .{
         .site = upgrade_site,
@@ -2684,7 +2697,7 @@ fn upgradeState() sheet.State {
         .description = description,
         .description_height = @max(40, lines * 20),
         .fields = &.{},
-        .primary = if (local_only) translated("Make Cloud compatible") else translated("Update"),
+        .primary = if (local_only) translated("Convert") else translated("Update"),
         .primary_enabled = upgrade_planned and sheet_error == null,
         .busy = sheet_busy,
         .hover = sheet_hover,
@@ -2729,8 +2742,85 @@ fn standingsRun() void {
 fn standingsDone(_: ?*anyopaque) callconv(.c) void {
     standings_running = false;
     refreshSites();
+    updateBehind();
     redrawAll();
 }
+
+/// Whether projects on this Mac update to the Publr Cloud runs by themselves: yes unless
+/// turned off in Settings (`auto-update` in Desktop's support folder says `off`).
+fn projectsUpdate() bool {
+    var pb: [1024]u8 = undefined;
+    const path = std.fmt.bufPrint(&pb, "{s}/auto-update", .{support_dir}) catch return true;
+    var buf: [8]u8 = undefined;
+    const said = Io.Dir.cwd().readFile(io, path, &buf) catch return true;
+    return !std.mem.eql(u8, std.mem.trim(u8, said, " \n"), "off");
+}
+
+fn setProjectsUpdate(on: bool) void {
+    var pb: [1024]u8 = undefined;
+    const path = std.fmt.bufPrint(&pb, "{s}/auto-update", .{support_dir}) catch return;
+    Io.Dir.cwd().writeFile(io, .{
+        .sub_path = path,
+        .data = if (on) "on\n" else "off\n",
+    }) catch {};
+}
+
+/// Projects on this Mac behind the Publr Cloud runs, moved to it one at a time off the main
+/// thread (`publr upgrade`: backed up, put back if it does not start). A dev build is the
+/// person's to convert; a shared site's copy follows Cloud by itself. A failure stays on
+/// the card until an update succeeds.
+var auto_updating = false;
+
+fn updateBehind() void {
+    if (auto_updating or !projectsUpdate()) return;
+    var names: std.ArrayList([]u8) = .empty;
+    for (sites.list.items) |s| {
+        const st = s.standing orelse continue;
+        if (s.live.len > 0 or st.state != .update_available) continue;
+        if (std.mem.eql(u8, st.runs, core_compat.development)) continue;
+        if (update_failed.get(s.name) != null) continue;
+        names.append(gpa, gpa.dupe(u8, s.name) catch continue) catch {};
+    }
+    if (names.items.len == 0) return names.deinit(gpa);
+    const job = gpa.create(AutoUpdate) catch return names.deinit(gpa);
+    job.* = .{
+        .names = names,
+    };
+    auto_updating = true;
+    platform.spawn(AutoUpdate.run, .{job}) catch {
+        auto_updating = false;
+    };
+}
+
+const AutoUpdate = struct {
+    names: std.ArrayList([]u8),
+    /// Why each failed, beside its name; empty for one that updated.
+    why: std.ArrayList([]const u8) = .empty,
+
+    fn run(self: *AutoUpdate) void {
+        for (self.names.items) |name| {
+            const problem: []const u8 = if (sites.upgrade(name, false)) "" else |e| upgradeProblem(e);
+            self.why.append(gpa, problem) catch {};
+        }
+        platform.runOnMain(self, done);
+    }
+
+    fn done(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *AutoUpdate = @ptrCast(@alignCast(ctx));
+        defer gpa.destroy(self);
+        for (self.names.items, 0..) |name, k| {
+            const why = if (k < self.why.items.len) self.why.items[k] else "";
+            if (why.len > 0) {
+                update_failed.put(gpa, name, why) catch gpa.free(name);
+            } else gpa.free(name);
+        }
+        self.names.deinit(gpa);
+        self.why.deinit(gpa);
+        auto_updating = false;
+        refreshSites();
+        redrawAll();
+    }
+};
 
 fn deploy(name: []const u8) void {
     // A site Cloud's Publr cannot open is made Cloud compatible first.
@@ -2795,9 +2885,9 @@ fn deployState(fields: *[2]sheet.Field) sheet.State {
             .text = translated("The six characters at the end keep every address unique. Made from the name when left empty."),
         },
     };
-    const title = filled(frame_arena.allocator(), translated("Deploy \u{201c}{name}\u{201d} to Publr Cloud"), .{
+    const title = filled(frame_arena.allocator(), translated("Share \u{201c}{name}\u{201d} on Publr Cloud"), .{
         .name = deploy_site,
-    }) catch translated("Deploy to Publr Cloud");
+    }) catch translated("Share on Publr Cloud");
     const desc = filled(frame_arena.allocator(), translated("The site goes live at the address below. This Mac keeps it as its working copy. {space}"), .{
         .space = in_space,
     }) catch "";
@@ -2805,7 +2895,7 @@ fn deployState(fields: *[2]sheet.Field) sheet.State {
         .title = title,
         .description = desc,
         .fields = fields[0..1],
-        .primary = translated("Deploy"),
+        .primary = translated("Share"),
         .primary_enabled = valid,
         .busy = if (deploy_job != null) deployBusyText() else sheet_busy,
         .hover = sheet_hover,
@@ -3136,7 +3226,8 @@ fn projectPage(i: usize) project.State {
     const standing = if (kind == .local) local.?.standing else null;
     const version_callout: project.Callout = if (standing) |st| switch (st.state) {
         .local_only => .local_only,
-        .update_available => .update_out,
+        // A site on this Mac updates by itself: nothing to ask.
+        .update_available => .none,
         .up_to_date => .none,
     } else .none;
     return .{
@@ -3153,7 +3244,8 @@ fn projectPage(i: usize) project.State {
         .running = if (kind == .local) local.?.running else state != .failed,
         .changed = kind == .both and (state == .unsent or state == .waiting),
         .callout = if (kind != .both) version_callout else switch (state) {
-            .unsent => .unsent,
+            // Agents' work goes up as a review; nobody sends a shared site's copy by hand.
+            .unsent => .none,
             .waiting => if (waiting) .waiting else .none,
             .failed => .failed,
             else => .none,
@@ -3233,7 +3325,6 @@ fn clickProject(i: usize, target: project.Target, mods: platform.event.Mods) voi
         .callout => if (pt.live.len == 0) openUpgrade(pt.folder) else if (syncing.reviewOf(pt.folder) != null) openReview(pt.folder, pt.live) else syncing.send(pt.folder),
         .rare => |r| switch (r) {
             .clone => startClone(pt),
-            .local_copy => openSite(pt.folder),
             .finder => showInFinder(pt.folder),
             .copy_path => copyPath(pt.folder),
             .deploy => deploy(pt.folder),
@@ -3926,6 +4017,7 @@ fn settingsState() settings.State {
         .version = updating.version,
         .update_line = updateLine(),
         .update_button = updateButton(),
+        .projects_update = projectsUpdate(),
         .advanced = settings_advanced,
         .scroll = scroll,
         .busy = settings_busy,
@@ -3988,6 +4080,11 @@ fn clickSettings(t: settings.Target) void {
         .change_project_language => openLanguageSheet(.projects),
         .connect_tool => |tool| tools.connect(tool),
         .update => clickUpdate(),
+        .projects_update => {
+            setProjectsUpdate(!projectsUpdate());
+            updateBehind();
+            redrawAll();
+        },
         .add_folder => chooseFolder(.add),
         .remove_folder => |i| removeFolder(i),
         .advanced => {
