@@ -106,6 +106,11 @@ const Entry = struct {
     review: []u8 = &.{},
     /// Once failed: why, as the command said it (`reasonOf`).
     why: []u8 = &.{},
+    /// The copy holds the site's media files (false: they load from the site), what they
+    /// weigh, and whether Download media is bringing them down now.
+    media: bool = true,
+    media_bytes: u64 = 0,
+    downloading: bool = false,
 };
 
 /// How long a folder's state stands before it is asked again.
@@ -114,7 +119,7 @@ const recheck_ms: i64 = 60_000;
 const signed_out_code: u8 = 3;
 const own_work_code: u8 = 4;
 
-const Command = enum { check, pull, push, login };
+const Command = enum { check, pull, push, login, media };
 
 const Job = struct {
     command: Command,
@@ -148,6 +153,7 @@ const Job = struct {
             .check => &.{ shared.publr, "pull", "--check" },
             .pull => &.{ shared.publr, "pull" },
             .push => &.{ shared.publr, "push" },
+            .media => &.{ shared.publr, "pull", "--media" },
             .login => &.{ shared.publr, "login", job.site, "--sign-on", job.token },
         };
         const result = try std.process.run(a, shared.io, .{
@@ -234,6 +240,32 @@ pub fn reviewOf(name: []const u8) ?[]const u8 {
     const e = shared.entries.get(name) orelse return null;
     if (e.state != .waiting or e.review.len == 0) return null;
     return e.review;
+}
+
+/// A copy's media: whether it holds the files, what they weigh, whether they are coming down.
+pub const Media = struct {
+    held: bool,
+    bytes: u64,
+    downloading: bool,
+};
+
+pub fn mediaOf(name: []const u8) ?Media {
+    const e = shared.entries.get(name) orelse return null;
+    return .{
+        .held = e.media,
+        .bytes = e.media_bytes,
+        .downloading = e.downloading,
+    };
+}
+
+/// Download media: every media file of the site brought into the copy (`publr pull --media`),
+/// which serves them itself from then on.
+pub fn downloadMedia(name: []const u8) void {
+    const e = shared.entries.getPtr(name) orelse return;
+    if (e.busy or e.media) return;
+    e.downloading = true;
+    start(name, .media, false, "");
+    shared.changed();
 }
 
 /// Where the folder `name` is; null for a folder Desktop has not asked about.
@@ -328,6 +360,8 @@ const Where = struct {
     behind: bool = false,
     /// Its pushed work was discarded on Cloud: it comes down again as the site is.
     discarded: bool = false,
+    media: bool = true,
+    media_bytes: u64 = 0,
     review: []const u8 = "",
 };
 
@@ -372,6 +406,8 @@ fn finished(job: *Job) void {
             e.state = if (where.unsent) .unsent else if (where.waiting) .waiting else .up_to_date;
             if (e.review.len > 0) shared.gpa.free(e.review);
             e.review = shared.gpa.dupe(u8, where.review) catch &.{};
+            e.media = where.media;
+            e.media_bytes = where.media_bytes;
             // A folder with nothing of its own (or all of it merged), or whose work the review
             // discarded, takes Cloud's state: the copy always equals the site.
             if ((where.behind or where.discarded) and !where.unsent and !where.waiting) {
@@ -398,6 +434,11 @@ fn finished(job: *Job) void {
                 return;
             }
             e.state = .checking;
+            start(job.name, .check, false, "");
+        },
+        .media => {
+            e.downloading = false;
+            if (job.exit == 0) e.media = true;
             start(job.name, .check, false, "");
         },
     }

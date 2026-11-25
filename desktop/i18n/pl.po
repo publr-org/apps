@@ -818,3 +818,12 @@ msgstr "Aktualizacja nieudana"
 
 msgid "Update to the Publr Cloud runs by themselves, backed up first"
 msgstr "Same aktualizują się do wersji Publr z Cloud, po zrobieniu kopii zapasowej"
+
+msgid "Download media"
+msgstr "Pobierz multimedia"
+
+msgid "Download media · {size}"
+msgstr "Pobierz multimedia · {size}"
+
+msgid "Downloading media…"
+msgstr "Pobieranie multimediów…"

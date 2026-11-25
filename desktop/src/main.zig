@@ -60,6 +60,8 @@ const Action = struct {
     const copy_path = 16;
     /// Update, or Make Cloud compatible: moved to the Publr Cloud runs (`publr upgrade`).
     const upgrade = 17;
+    /// A shared site's copy brings the site's media files down (`publr pull --media`).
+    const download_media = 18;
     const view_live_local = 8;
     const send_changes = 10;
     const open_review = 15;
@@ -615,6 +617,21 @@ fn groupItems(a: std.mem.Allocator) void {
     };
 }
 
+/// "Download media · 120 MB": the size said before anything comes down; "Downloading media…"
+/// while it does.
+fn mediaTitle(m: syncing.Media) []const u8 {
+    if (m.downloading) return translated("Downloading media\u{2026}");
+    if (m.bytes == 0) return translated("Download media");
+    const mib = @as(f64, @floatFromInt(m.bytes)) / (1024 * 1024);
+    const size = if (mib >= 1024)
+        std.fmt.allocPrint(frame_arena.allocator(), "{d:.1} GB", .{mib / 1024}) catch ""
+    else
+        std.fmt.allocPrint(frame_arena.allocator(), "{d:.0} MB", .{@max(1, mib)}) catch "";
+    return filled(frame_arena.allocator(), translated("Download media \u{00b7} {size}"), .{
+        .size = size,
+    }) catch translated("Download media");
+}
+
 /// A site a development build of Publr made: Cloud's Publr cannot open it until it is
 /// converted to a regular build.
 fn isDevBuild(s: @import("sites.zig").Site) bool {
@@ -1039,6 +1056,11 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
             if (syncing.reviewOf(name) != null) .{
                 .title = translated("Open review"),
                 .tag = Action.open_review,
+            } else null,
+            if (syncing.mediaOf(name)) |m| if (m.held) null else .{
+                .title = mediaTitle(m),
+                .tag = Action.download_media,
+                .enabled = !m.downloading,
             } else null,
             .{
                 .separator = true,
@@ -1946,6 +1968,7 @@ fn act(name: []const u8, tag: u32) void {
         Action.stop => sites.stop(name),
         Action.start => sites.start(name),
         Action.upgrade => return openUpgrade(name),
+        Action.download_media => syncing.downloadMedia(name),
         Action.trash => {
             for (tabs.items, 0..) |t, i| if (t.url == null and t.project == null and std.mem.eql(u8, t.name, name)) {
                 closeTab(i);
