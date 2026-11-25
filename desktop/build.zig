@@ -52,6 +52,13 @@ pub fn build(b: *std.Build) void {
                     .name = "publr_cli",
                     .module = cli.module("publr_cli"),
                 },
+                .{
+                    .name = "publr_api",
+                    .module = cli.builder.dependency("publr_api", .{
+                        .target = target,
+                        .optimize = optimize,
+                    }).module("publr_api"),
+                },
             },
         }),
     });
@@ -168,6 +175,13 @@ fn add_web(b: *std.Build, optimize: std.builtin.Optimize) void {
                 .{
                     .name = "publr_cli",
                     .module = cli.module("publr_cli"),
+                },
+                .{
+                    .name = "publr_api",
+                    .module = cli.builder.dependency("publr_api", .{
+                        .target = target,
+                        .optimize = optimize,
+                    }).module("publr_api"),
                 },
             },
         }),

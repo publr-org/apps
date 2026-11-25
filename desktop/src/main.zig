@@ -216,6 +216,8 @@ var deploy_after_sign_in: ?[]const u8 = null;
 var sheet_hover: sheet.Target = .none;
 /// What the sheet's work said went wrong, or what it is doing.
 var sheet_error: ?[]const u8 = null;
+/// `sheet_error` is why Cloud listed no spaces: cleared once it lists them.
+var sheet_error_listing = false;
 /// Cloud's reason a project was not made, kept for `sheet_error`.
 var problem_text: []const u8 = "";
 var sheet_busy: ?[]const u8 = null;
@@ -829,6 +831,10 @@ fn cloudThumbNames() []const []const u8 {
 /// The Cloud listing changed (signed in or out, listed again).
 fn cloudChanged() void {
     if (cloud.problem) |pr| std.debug.print("desktop: cloud: {s}\n", .{pr});
+    if (sheet_error_listing and cloud.spaces.len > 0) {
+        sheet_error = null;
+        sheet_error_listing = false;
+    }
     thumbs.loadSaved(cloudThumbNames());
     // Pictures of the live sites; previews are private.
     for (cloud.spaces) |sp| for (sp.projects) |p| if (!p.preview) {
@@ -2469,11 +2475,16 @@ fn deploy(name: []const u8) void {
         if (cloud.status == .signed_out) cloud.signIn();
         return redrawAll();
     }
-    if (cloud.spaces.len == 0) {
+    // No spaces: an account without one makes its first on Cloud's welcome page. When the
+    // listing failed instead, the sheet says why and Cloud is asked again; the sheet works
+    // once it answers.
+    const listing_failed = cloud.problem;
+    if (cloud.spaces.len == 0 and listing_failed == null) {
         var buf: [512]u8 = undefined;
         platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}/welcome", .{cloud.base}, 0) catch return);
         return;
     }
+    if (cloud.spaces.len == 0) cloud.refresh();
     if (active != null) showHome();
     // Owned: the list's names go when it is read again (after a deploy, say).
     const chosen = gpa.dupe(u8, sites.find(name).?.name) catch return;
@@ -2482,7 +2493,8 @@ fn deploy(name: []const u8) void {
     open_sheet = .deploy;
     address_field.set(name);
     freshSuffix();
-    sheet_error = null;
+    sheet_error = if (cloud.spaces.len == 0) listing_failed else null;
+    sheet_error_listing = sheet_error != null;
     sheet_busy = null;
     window.setTextInput(true);
     redrawAll();
@@ -2584,6 +2596,7 @@ fn startDeploy() void {
     deploy_progress = .{};
     deploy_job = job;
     sheet_error = null;
+    sheet_error_listing = false;
     sheet_busy = translated("Packing the site…");
     window.setTextInput(false);
     job.start() catch {
@@ -3437,6 +3450,7 @@ fn rememberRecent(name: []const u8) void {
 test {
     _ = deploying;
     _ = updating;
+    _ = @import("cloud.zig");
     _ = bar;
     _ = home;
     _ = project;

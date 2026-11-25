@@ -6,6 +6,8 @@
 
 const std = @import("std");
 const platform = @import("platform");
+/// How Publr's API answers (`{ "result": … }`) and refuses (`{ "message": … }`).
+const api = @import("publr_api");
 const i18n = @import("i18n.zig");
 const translated = i18n.translated;
 
@@ -293,19 +295,16 @@ const Create = struct {
             .payload = sent,
             .content_type = "application/json",
         })) |reply| {
-            const Answer = struct {
+            const Created = struct {
                 slug: []const u8 = "",
-                message: ?[]const u8 = null,
             };
-            const answer = std.json.parseFromSliceLeaky(Answer, a, reply.body, .{
-                .ignore_unknown_fields = true,
-            }) catch Answer{};
-            if (reply.status == .ok and answer.slug.len > 0) {
+            const answer = if (reply.status == .ok) api.result(Created, a, reply.body) catch Created{} else Created{};
+            if (answer.slug.len > 0) {
                 const scheme = if (std.mem.startsWith(u8, self.cloud.base, "http://")) "http" else "https";
                 self.made.problem = null;
                 self.made.address = std.fmt.allocPrint(a, "{s}://{s}.{s}", .{ scheme, answer.slug, self.domain }) catch "";
             } else {
-                self.made.problem = answer.message orelse translated("Publr Cloud did not make the project.");
+                self.made.problem = refused(a, reply.body) orelse translated("Publr Cloud did not make the project.");
             }
         } else |_| {}
         platform.runOnMain(self, finish);
@@ -362,16 +361,13 @@ const SignOn = struct {
             .payload = sent,
             .content_type = "application/json",
         })) |reply| {
-            const Answer = struct {
+            const Signed = struct {
                 token: []const u8 = "",
                 slug: []const u8 = "",
                 domain: ?[]const u8 = null,
-                message: ?[]const u8 = null,
             };
-            const answer = std.json.parseFromSliceLeaky(Answer, a, reply.body, .{
-                .ignore_unknown_fields = true,
-            }) catch Answer{};
-            if (reply.status == .ok and answer.token.len > 0) {
+            const answer = if (reply.status == .ok) api.result(Signed, a, reply.body) catch Signed{} else Signed{};
+            if (answer.token.len > 0) {
                 const scheme = if (std.mem.startsWith(u8, self.cloud.base, "http://")) "http" else "https";
                 self.signed.problem = null;
                 self.signed.token = answer.token;
@@ -382,7 +378,7 @@ const SignOn = struct {
                     answer.token,
                 }, 0) catch "";
             } else {
-                self.signed.problem = answer.message orelse translated("Publr Cloud did not sign you in to the project.");
+                self.signed.problem = refused(a, reply.body) orelse translated("Publr Cloud did not sign you in to the project.");
             }
         } else |_| {}
         platform.runOnMain(self, finish);
@@ -435,10 +431,7 @@ const Job = struct {
             arena.deinit();
             return;
         }
-        self.listing = std.json.parseFromSliceLeaky(Listing, a, reply.body, .{
-            .ignore_unknown_fields = true,
-            .allocate = .alloc_always,
-        }) catch {
+        self.listing = api.result(Listing, a, reply.body) catch {
             self.problem = translated("Publr Cloud answered something Desktop does not understand.");
             arena.deinit();
             return;
@@ -563,6 +556,12 @@ fn authorize(c: *Cloud) ![]u8 {
     return c.gpa.dupe(u8, tok.access_token);
 }
 
+/// What a refusal says, when it says something.
+fn refused(arena: std.mem.Allocator, body: []const u8) ?[]const u8 {
+    const said = api.refusal(arena, body).message;
+    return if (said.len > 0) said else null;
+}
+
 const back_page =
     \\<!doctype html><html lang={s}><meta charset=utf-8><title>Publr Desktop</title>
     \\<body style="margin:0;height:100vh;display:grid;place-items:center;font:15px -apple-system,system-ui,sans-serif;color:#222">
@@ -657,4 +656,29 @@ fn request(io: std.Io, a: std.mem.Allocator, base: []const u8, method: std.http.
         .status = result.status,
         .body = body.written(),
     };
+}
+
+test "Cloud's answers are read inside Publr's envelope" {
+    var arena_state: std.heap.ArenaAllocator = .init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const listed = try api.result(Listing, arena,
+        \\{"result":{"account":{"name":"Ada","email":"ada@example.com"},
+        \\"spaces":[{"slug":"ada","name":"Ada's space","pro":false,"projects":[
+        \\{"name":"Shop","slug":"shop-x1","address":"https://shop-x1.publr.app","preview":false,"state":"ready"}]}]},
+        \\"meta":{}}
+    );
+    try std.testing.expectEqualStrings("Ada", listed.account.name);
+    try std.testing.expectEqual(1, listed.spaces.len);
+    try std.testing.expectEqualStrings("shop-x1", listed.spaces[0].projects[0].slug);
+
+    // The bare listing of Cloud before Publr 0.8 is no answer: Desktop says so, never
+    // "no spaces".
+    try std.testing.expectError(error.Invalid, api.result(Listing, arena,
+        \\{"account":{"name":"Ada"},"spaces":[]}
+    ));
+    try std.testing.expectEqualStrings("You may not do this.", refused(arena,
+        \\{"error":"Denied","message":"You may not do this.","problems":[]}
+    ).?);
 }
