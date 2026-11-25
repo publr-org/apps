@@ -326,6 +326,8 @@ const Where = struct {
     unsent: bool = false,
     waiting: bool = false,
     behind: bool = false,
+    /// Its pushed work was discarded on Cloud: it comes down again as the site is.
+    discarded: bool = false,
     review: []const u8 = "",
 };
 
@@ -370,8 +372,9 @@ fn finished(job: *Job) void {
             e.state = if (where.unsent) .unsent else if (where.waiting) .waiting else .up_to_date;
             if (e.review.len > 0) shared.gpa.free(e.review);
             e.review = shared.gpa.dupe(u8, where.review) catch &.{};
-            // A folder with nothing of its own (or all of it merged) takes Cloud's state.
-            if (where.behind and !where.unsent and !where.waiting) {
+            // A folder with nothing of its own (or all of it merged), or whose work the review
+            // discarded, takes Cloud's state: the copy always equals the site.
+            if ((where.behind or where.discarded) and !where.unsent and !where.waiting) {
                 e.state = .updating;
                 start(job.name, .pull, shared.running(job.name), "");
             }
