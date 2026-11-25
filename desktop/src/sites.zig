@@ -23,6 +23,20 @@ pub const Site = struct {
     own_build: []const u8 = "",
     /// A build every project runs instead (`publr config publr <path>`); empty: none.
     shared_build: []const u8 = "",
+    /// Where it stands against the Publr Cloud runs (`core.compat`); null until Cloud was
+    /// first asked.
+    standing: ?Standing = null,
+};
+
+/// A site against Cloud's release, its words owned by the list.
+pub const Standing = struct {
+    state: core.compat.State,
+    /// What it runs: a release, or "development build".
+    runs: []const u8,
+    /// The release Cloud runs, which Update moves it to.
+    cloud: []const u8,
+    /// Why it is local only; empty otherwise.
+    reason: []const u8,
 };
 
 pub const Sites = struct {
@@ -65,6 +79,14 @@ pub const Sites = struct {
                 .own_build = self.gpa.dupe(u8, s.local.publr) catch continue,
                 .shared_build = self.gpa.dupe(u8, config.publr) catch continue,
             };
+            if (core.compat.of(&config, s, .{ .wait = false })) |v| {
+                site.standing = .{
+                    .state = v.state,
+                    .runs = self.gpa.dupe(u8, v.runs) catch "",
+                    .cloud = self.gpa.dupe(u8, v.cloud) catch "",
+                    .reason = self.gpa.dupe(u8, v.reason) catch "",
+                };
+            } else |_| {}
             readLink(self, a, &site);
             self.list.append(self.gpa, site) catch {};
         }
@@ -80,6 +102,11 @@ pub const Sites = struct {
         self.gpa.free(s.shared_build);
         if (s.live.len > 0) self.gpa.free(s.live);
         if (s.live_admin.len > 0) self.gpa.free(s.live_admin);
+        if (s.standing) |st| {
+            self.gpa.free(st.runs);
+            self.gpa.free(st.cloud);
+            self.gpa.free(st.reason);
+        }
     }
 
     /// The folder's Cloud link, if it was deployed (`cloud.json`, as `publr deploy` and
@@ -237,6 +264,38 @@ pub const Sites = struct {
             try core.server.start(&config, &site, try core.versions.binary_for(&config, site));
             try core.helper.ensure(&config, self.command_path);
         }
+    }
+
+    /// Every site measured against Cloud's release again, waiting as it must: Cloud asked
+    /// for its release, a development build's database checked by Cloud's Publr. What it
+    /// finds is kept for `refresh`. Call it off the main thread.
+    pub fn checkStandings(self: *Sites) void {
+        var arena: std.heap.ArenaAllocator = .init(self.gpa);
+        defer arena.deinit();
+        const config = core.Config.load(self.io, arena.allocator(), self.env) catch return;
+        const found = core.Sites.find(&config) catch return;
+        for (found.all) |s| _ = core.compat.of(&config, s, .{}) catch {};
+    }
+
+    /// What updating `name` to Cloud's release would do (`publr upgrade --check`), in `a`.
+    /// Call it off the main thread.
+    pub fn planUpgrade(self: *Sites, a: std.mem.Allocator, name: []const u8) !core.upgrade.Plan {
+        const config = try a.create(core.Config);
+        config.* = try core.Config.load(self.io, a, self.env);
+        return core.upgrade.plan(config, try locate(config, name));
+    }
+
+    /// `name` moved to Cloud's release (`publr upgrade`); `accept_left_out` when the person
+    /// agreed to what the plan keeps aside. Call it off the main thread.
+    pub fn upgrade(self: *Sites, name: []const u8, accept_left_out: bool) !void {
+        var arena: std.heap.ArenaAllocator = .init(self.gpa);
+        defer arena.deinit();
+        const config = try core.Config.load(self.io, arena.allocator(), self.env);
+        var site = try locate(&config, name);
+        const chosen = try core.upgrade.plan(&config, site);
+        try core.upgrade.run(&config, &site, chosen, .{
+            .accept_left_out = accept_left_out,
+        });
     }
 
     /// Stopped and moved to its folder's `.trash`, as `publr rm` does; a single site's own

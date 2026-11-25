@@ -82,6 +82,8 @@ pub const Rare = enum {
     finder,
     copy_path,
     deploy,
+    /// In Deploy's place for a site Cloud's Publr cannot open.
+    make_compatible,
     dashboard,
     remove,
 
@@ -92,6 +94,7 @@ pub const Rare = enum {
             .finder => translated("Show in Finder"),
             .copy_path => translated("Copy path"),
             .deploy => translated("Deploy to Cloud\u{2026}"),
+            .make_compatible => translated("Make Cloud compatible\u{2026}"),
             .dashboard => translated("Open in Cloud dashboard"),
             .remove => translated("Remove from this Mac"),
         };
@@ -104,6 +107,7 @@ pub const Rare = enum {
             .finder => icons.folder,
             .copy_path => icons.copy,
             .deploy => icons.upload,
+            .make_compatible => icons.sync,
             .dashboard => icons.globe,
             .remove => icons.trash,
         };
@@ -150,7 +154,9 @@ pub const Target = union(enum) {
 };
 
 /// What needs the person now, if anything.
-pub const Callout = enum { none, unsent, waiting, failed };
+/// The callout under the header: the work waiting for Cloud (a linked folder), or where a
+/// site on this Mac stands against the Publr Cloud runs.
+pub const Callout = enum { none, unsent, waiting, failed, local_only, update_out };
 
 pub const State = struct {
     /// Where the tab's content starts: under the tab bar.
@@ -166,6 +172,10 @@ pub const State = struct {
     callout: Callout,
     /// Why keeping it in sync failed, as the command said it; the failed callout's words.
     failed_why: []const u8 = "",
+    /// The version callout's words: why it is local only, or which release is out.
+    callout_title: []const u8 = "",
+    /// Cloud's Publr cannot open it: Make Cloud compatible takes Deploy's place.
+    local_only: bool = false,
     /// The project's address: live on Cloud, else this Mac's.
     address: []const u8,
     /// The Cloud space; empty when not on Cloud or not known.
@@ -356,8 +366,17 @@ fn cloneRect(s: State, u: *ui.Ui) ui.Rect {
     };
 }
 
+/// Whether the line under the name says the state: not when a sync callout says it at length
+/// (a version callout says something else).
+fn statusShown(s: State) bool {
+    return switch (s.callout) {
+        .none, .local_only, .update_out => true,
+        .unsent, .waiting, .failed => false,
+    };
+}
+
 fn addressRect(s: State, u: *ui.Ui) ui.Rect {
-    const after_status = if (s.callout == .none) 12 + u.measure(s.status, .{ .size = 13 }) + 22 else 0;
+    const after_status = if (statusShown(s)) 12 + u.measure(s.status, .{ .size = 13 }) + 22 else 0;
     const x = contentX(s) + after_status;
     return .{
         .x = x,
@@ -626,7 +645,7 @@ fn rareList(s: State, out: *[7]Rare) []const Rare {
         n += 2;
     }
     if (s.kind == .local) {
-        out[n] = .deploy;
+        out[n] = if (s.local_only) .make_compatible else .deploy;
         n += 1;
     }
     if (s.kind != .local) {
@@ -689,7 +708,7 @@ pub fn hit(s: State, u: *ui.Ui, x: f64, y: f64) Target {
     if (siteRect(s, u).contains(x, y)) return .site;
     if (s.kind == .cloud and !s.cloning and cloneRect(s, u).contains(x, y)) return .clone;
     if (addressRect(s, u).contains(x, y)) return .address;
-    if (s.callout == .unsent or s.callout == .waiting) {
+    if (s.callout != .none and s.callout != .failed) {
         if (calloutButton(s, u).contains(x, y)) return .callout;
     }
     for (0..s.apps.len) |k| {
@@ -1118,9 +1137,9 @@ fn drawHead(u: *ui.Ui, s: State, t: *const Theme) !void {
         .color = t.text,
         .tracking = -0.7,
     });
-    // The callout says the state at length when there is one; the line keeps the address.
+    // A sync callout says the state at length; the line keeps the address.
     const address = addressRect(s, u);
-    if (s.callout == .none) {
+    if (statusShown(s)) {
         try statusLine(u, t, x, headTop(s) + 44, u.measure(s.status, .{ .size = 13 }) + 14, s);
         try u.text(.{
             .x = address.x - 14,
@@ -1184,6 +1203,8 @@ fn calloutLabel(c: Callout) []const u8 {
     return switch (c) {
         .unsent => translated("Send to Cloud"),
         .waiting => translated("Open review"),
+        .local_only => translated("Make Cloud compatible"),
+        .update_out => translated("Update"),
         .failed, .none => "",
     };
 }
@@ -1209,6 +1230,8 @@ fn drawCallout(u: *ui.Ui, s: State, t: *const Theme) !void {
     const glyph = switch (s.callout) {
         .unsent => icons.upload,
         .waiting => icons.branch,
+        .local_only => icons.alert_triangle,
+        .update_out => icons.sync,
         .failed, .none => icons.alert_triangle,
     };
     const icon_box: ui.Rect = .{
@@ -1226,6 +1249,7 @@ fn drawCallout(u: *ui.Ui, s: State, t: *const Theme) !void {
     const title = switch (s.callout) {
         .unsent => translated("Changes not on Cloud"),
         .waiting => translated("Waiting for review"),
+        .local_only, .update_out => s.callout_title,
         .failed, .none => if (s.failed_why.len > 0) s.failed_why else translated("Can\u{2019}t reach Cloud"),
     };
     const text_x = icon_box.x + icon_box.w + 14;

@@ -44,6 +44,9 @@ pub const Kind = enum {
     both,
 };
 
+/// A pill on a card: an update is out, or Cloud's Publr cannot open the project.
+pub const Badge = enum { none, update, local_only };
+
 /// A project as Home shows it.
 pub const Item = struct {
     name: []const u8,
@@ -55,6 +58,8 @@ pub const Item = struct {
     changed: bool = false,
     /// Its thumbnail's name in the `ui` (null: none yet).
     thumb: ?[]const u8 = null,
+    /// Where it stands against the Publr Cloud runs, as a pill skimming the list catches.
+    badge: Badge = .none,
     /// Where it is, as its section's label: the folder holding it ("~/Publr"), "On Cloud".
     /// Items of one group come together; labels show when there are two groups or more.
     group: []const u8 = "",
@@ -954,6 +959,46 @@ fn drawThumb(u: *ui.Ui, t: *const Theme, r: ui.Rect, it: Item, hovered: bool, ra
     if (r.h >= 60) try drawMarks(u, t, r.x + 8, r.y + r.h - marks_size - 8, it.kind);
 }
 
+const pill_height: f32 = 20;
+const pill_text: ui.TextStyle = .{
+    .size = 11,
+    .weight = 600,
+    .color = ui.hex(0xffffff),
+};
+
+fn pillLabel(badge: Badge) []const u8 {
+    return switch (badge) {
+        .none => "",
+        .update => translated("Update"),
+        .local_only => translated("Local only"),
+    };
+}
+
+pub fn pillWidth(u: *ui.Ui, badge: Badge) f32 {
+    return if (badge == .none) 0 else u.measure(pillLabel(badge), pill_text) + 16;
+}
+
+/// The badge as a pill at `x`, `y`: red for local only, amber for an update.
+pub fn drawPill(u: *ui.Ui, t: *const Theme, x: f32, y: f32, badge: Badge) !void {
+    if (badge == .none) return;
+    const r: ui.Rect = .{
+        .x = x,
+        .y = y,
+        .w = pillWidth(u, badge),
+        .h = pill_height,
+    };
+    try u.box(r, .{
+        .fill = if (badge == .local_only) t.danger else t.preview,
+        .radius = pill_height / 2,
+    });
+    try u.text(r, pillLabel(badge), .{
+        .size = pill_text.size,
+        .weight = pill_text.weight,
+        .color = pill_text.color,
+        .@"align" = .center,
+    });
+}
+
 const marks_size: f32 = 22;
 
 fn marksOf(kind: Kind) []const []const u8 {
@@ -1012,6 +1057,7 @@ fn drawStatus(u: *ui.Ui, t: *const Theme, x: f32, y: f32, w: f32, it: Item) !voi
 fn drawCard(u: *ui.Ui, s: State, t: *const Theme, i: usize, it: Item, hovered: bool) !void {
     const th = thumbRect(s, i);
     try drawThumb(u, t, th, it, hovered, 8);
+    try drawPill(u, t, th.x + 8, th.y + 8, it.badge);
     try u.text(.{
         .x = th.x + 1,
         .y = th.y + th.h + 10,
@@ -1048,6 +1094,10 @@ fn drawRow(u: *ui.Ui, s: State, t: *const Theme, i: usize, it: Item, hovered: bo
         .weight = 500,
         .color = t.text,
     });
+    try drawPill(u, t, th.x + th.w + 14 + u.measure(it.name, .{
+        .size = 13,
+        .weight = 500,
+    }) + 10, r.y + 8, it.badge);
     try drawStatus(u, t, th.x + th.w + 14, r.y + 29, r.w - th.w - 80 - marksWidth(it.kind), it);
     try drawMarks(u, t, r.x + r.w - 56 - marksWidth(it.kind), r.y + (r.h - marks_size) / 2, it.kind);
     if (hovered) try menuButton(u, s, t, i, false);

@@ -58,6 +58,8 @@ const Action = struct {
     const start = 6;
     const trash = 7;
     const copy_path = 16;
+    /// Update, or Make Cloud compatible: moved to the Publr Cloud runs (`publr upgrade`).
+    const upgrade = 17;
     const view_live_local = 8;
     const send_changes = 10;
     const open_review = 15;
@@ -174,6 +176,8 @@ var open_sheet: ?enum {
     edit_app,
     /// An app's removal, from its card's Remove.
     remove_app,
+    /// Update, or Make Cloud compatible: a site moved to the Publr Cloud runs.
+    upgrade,
 } = null;
 /// The project tab and the app the app sheets are for.
 var app_tab: usize = 0;
@@ -372,6 +376,8 @@ pub fn main(init: std.process.Init) !void {
     thumbs.loadSaved(names[0..n]);
     for (sites.list.items) |s| if (s.running) thumbs.take(s.name, s.address);
     thumbs.loadSaved(cloudThumbNames());
+    // Where every site stands against Cloud's release, asked off the main thread.
+    checkStandings(true);
 
     if (timing_site) |name| {
         timeHome();
@@ -694,6 +700,11 @@ fn addLocal(a: std.mem.Allocator, name: []const u8) void {
         .running = if (linked) state != .failed else s.running,
         .changed = linked and (state == .unsent or state == .waiting),
         .thumb = thumb,
+        .badge = if (s.standing) |st| switch (st.state) {
+            .local_only => .local_only,
+            .update_available, .behind_cloud => .update,
+            .up_to_date => .none,
+        } else .none,
     }) catch return;
     item_refs.append(gpa, .{
         .local = intern(s.name),
@@ -1034,7 +1045,14 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
         @memcpy(menu_items[0..linked.len], &linked);
         return menu_items[0..linked.len];
     }
-    const list = [_]home.MenuItem{
+    // A site Cloud's Publr cannot open is made Cloud compatible where Deploy would be; a
+    // release behind Cloud's has its update offered beside Deploy.
+    const state = if (s.standing) |st| st.state else .up_to_date;
+    const update_title = if (s.standing) |st| filled(frame_arena.allocator(), translated("Update to Publr {version}"), .{
+        .version = st.cloud,
+    }) catch "" else "";
+    var n: usize = 0;
+    for ([_]?home.MenuItem{
         .{
             .title = translated("Open"),
             .tag = Action.open,
@@ -1043,10 +1061,17 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
             .title = translated("View site"),
             .tag = Action.view_site,
         },
-        .{
+        if (state == .local_only) .{
+            .title = translated("Make Cloud compatible\u{2026}"),
+            .tag = Action.upgrade,
+        } else .{
             .title = translated("Deploy to Cloud"),
             .tag = Action.deploy,
         },
+        if (state == .update_available) .{
+            .title = update_title,
+            .tag = Action.upgrade,
+        } else null,
         .{
             .separator = true,
         },
@@ -1072,9 +1097,11 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
             .title = translated("Move to Trash"),
             .tag = Action.trash,
         },
+    }) |item| if (item) |it| {
+        menu_items[n] = it;
+        n += 1;
     };
-    @memcpy(menu_items[0..list.len], &list);
-    return menu_items[0..list.len];
+    return menu_items[0..n];
 }
 
 // Events.
@@ -1905,6 +1932,7 @@ fn act(name: []const u8, tag: u32) void {
         },
         Action.stop => sites.stop(name),
         Action.start => sites.start(name),
+        Action.upgrade => return openUpgrade(name),
         Action.trash => {
             for (tabs.items, 0..) |t, i| if (t.url == null and t.project == null and std.mem.eql(u8, t.name, name)) {
                 closeTab(i);
@@ -2303,6 +2331,7 @@ fn sheetState(fields: *[2]sheet.Field) sheet.State {
     if (open_sheet == .remove_app) return removeAppState();
     if (open_sheet == .deploy) return deployState(fields);
     if (open_sheet == .deployed) return deployedState();
+    if (open_sheet == .upgrade) return upgradeState();
     var state = if (new_where == .cloud and cloudOffered()) projectState(fields) else localState(fields);
     if (cloudOffered()) state.choice = .{
         .label = translated("Where"),
@@ -2452,6 +2481,7 @@ fn primaryAction() void {
             redrawAll();
         },
         .deploy => startDeploy(),
+        .upgrade => startUpgrade(),
         .deployed => {
             var buf: [512]u8 = undefined;
             platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{deployed_address}, 0) catch return);
@@ -2468,7 +2498,237 @@ fn nowMs() i64 {
 
 /// Deploy, from a local site's menu: signed out, the browser's sign-in first, then the
 /// sheet; a new account without a space finishes setting up in the browser first.
+// Update, and Make Cloud compatible: one sheet whichever way it is reached (a card's menu,
+// the project's callout or more menu, Deploy for a site Cloud's Publr cannot open), and one
+// action, the command's `publr upgrade` (`.agents/specs/updates.md`, "Sites on a computer").
+
+/// The site the upgrade sheet is for, and what its plan says, in words (both owned).
+var upgrade_site: []u8 = "";
+var upgrade_said: []u8 = "";
+/// The plan is known; pressing the button agrees to what it keeps aside.
+var upgrade_planned = false;
+var upgrade_left_out = false;
+/// Every site measured against Cloud again: when, and whether it runs now.
+var standings_checked_ms: i64 = 0;
+var standings_running = false;
+const standings_every_ms: i64 = 60 * 60 * 1000;
+
+fn openUpgrade(name: []const u8) void {
+    if (open_sheet == .upgrade and sheet_busy != null) return;
+    if (active != null) showHome();
+    if (upgrade_site.len > 0) gpa.free(upgrade_site);
+    upgrade_site = gpa.dupe(u8, name) catch return;
+    if (upgrade_said.len > 0) gpa.free(upgrade_said);
+    upgrade_said = "";
+    upgrade_planned = false;
+    upgrade_left_out = false;
+    open_sheet = .upgrade;
+    sheet_error = null;
+    sheet_error_listing = false;
+    sheet_busy = translated("Checking what changes\u{2026}");
+    redrawAll();
+    startUpgradeJob(.plan, false);
+}
+
+fn startUpgrade() void {
+    if (!upgrade_planned or sheet_busy != null) return;
+    sheet_error = null;
+    sheet_busy = translated("Updating\u{2026}");
+    redrawAll();
+    startUpgradeJob(.run, upgrade_left_out);
+}
+
+fn startUpgradeJob(mode: UpgradeJob.Mode, accept: bool) void {
+    const job = gpa.create(UpgradeJob) catch return;
+    job.* = .{
+        .name = gpa.dupe(u8, upgrade_site) catch return gpa.destroy(job),
+        .mode = mode,
+        .accept = accept,
+    };
+    platform.spawn(UpgradeJob.run, .{job}) catch {
+        gpa.free(job.name);
+        gpa.destroy(job);
+        sheet_busy = null;
+    };
+}
+
+const core_compat = @import("publr_cli").compat;
+
+const UpgradeJob = struct {
+    name: []u8,
+    mode: Mode,
+    accept: bool,
+    /// The plan in words, owned; handed to the sheet.
+    said: []u8 = "",
+    left_out: bool = false,
+    problem: ?[]const u8 = null,
+
+    const Mode = enum { plan, run };
+
+    fn run(self: *UpgradeJob) void {
+        switch (self.mode) {
+            .plan => self.plan(),
+            .run => sites.upgrade(self.name, self.accept) catch |e| {
+                self.problem = upgradeProblem(e);
+            },
+        }
+        platform.runOnMain(self, done);
+    }
+
+    fn plan(self: *UpgradeJob) void {
+        var arena: std.heap.ArenaAllocator = .init(gpa);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const found = sites.planUpgrade(a, self.name) catch |e| {
+            self.problem = upgradeProblem(e);
+            return;
+        };
+        var text: std.ArrayList(u8) = .empty;
+        if (found.repair) text.appendSlice(a, translated("Its database is brought back to the shape that release expects.")) catch {};
+        if (found.left_out.len > 0) {
+            text.appendSlice(a, if (text.items.len > 0) " " else "") catch {};
+            text.appendSlice(a, translated("Kept aside in the backup, because that release has no place for them:")) catch {};
+            for (found.left_out, 0..) |line, k| {
+                text.appendSlice(a, if (k == 0) " " else ", ") catch {};
+                text.appendSlice(a, leftOutWords(a, line)) catch {};
+            }
+            text.append(a, '.') catch {};
+        }
+        self.said = gpa.dupe(u8, text.items) catch "";
+        self.left_out = found.left_out.len > 0;
+    }
+
+    fn done(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *UpgradeJob = @ptrCast(@alignCast(ctx));
+        defer gpa.destroy(self);
+        defer gpa.free(self.name);
+        const current = open_sheet == .upgrade and std.mem.eql(u8, self.name, upgrade_site);
+        if (!current) {
+            if (self.said.len > 0) gpa.free(self.said);
+            if (self.mode == .run) checkStandings(true);
+            return;
+        }
+        sheet_busy = null;
+        if (self.problem) |p| {
+            if (self.said.len > 0) gpa.free(self.said);
+            sheet_error = p;
+            return redrawAll();
+        }
+        switch (self.mode) {
+            .plan => {
+                if (upgrade_said.len > 0) gpa.free(upgrade_said);
+                upgrade_said = self.said;
+                upgrade_left_out = self.left_out;
+                upgrade_planned = true;
+            },
+            .run => {
+                closeSheet();
+                refreshSites();
+                if (sites.find(self.name)) |s| if (s.running) thumbs.take(s.name, s.address);
+                checkStandings(true);
+            },
+        }
+        redrawAll();
+    }
+};
+
+/// `leave-out ledger_transfers 3 rows` as people read it: "3 rows of ledger_transfers".
+fn leftOutWords(a: std.mem.Allocator, line: []const u8) []const u8 {
+    var words = std.mem.tokenizeScalar(u8, line, ' ');
+    _ = words.next();
+    const what = words.next() orelse return line;
+    const count = words.next() orelse return line;
+    const unit = words.next() orelse return line;
+    return std.fmt.allocPrint(a, "{s} {s} of {s}", .{ count, unit, what }) catch line;
+}
+
+fn upgradeProblem(e: anyerror) []const u8 {
+    return switch (e) {
+        error.ChosenForAll => translated("Every project runs the Publr chosen in Settings. Choose none there, then try again."),
+        error.RepairUnavailable => translated("The Publr Cloud runs can\u{2019}t repair this project yet. A later Publr release will."),
+        error.RepairRefused => translated("Its database can\u{2019}t be repaired. Nothing was changed."),
+        error.NotStarted => translated("It didn\u{2019}t start on the new Publr, so it was put back as it was."),
+        else => translated("The update didn\u{2019}t work. The project is as it was."),
+    };
+}
+
+fn upgradeState() sheet.State {
+    const size = window.size();
+    const a = frame_arena.allocator();
+    const standing = if (sites.find(upgrade_site)) |s| s.standing else null;
+    const local_only = standing != null and standing.?.state == .local_only;
+    const to = if (standing) |st| st.cloud else "";
+    const title = if (local_only) filled(a, translated("Make {site} Cloud compatible"), .{
+        .site = upgrade_site,
+    }) catch "" else filled(a, translated("Update {site} to Publr {version}"), .{
+        .site = upgrade_site,
+        .version = to,
+    }) catch "";
+    const what = if (local_only) filled(a, translated("{reason}. Desktop backs it up, moves it to Publr {version}, the release Cloud runs, and starts it again."), .{
+        .reason = if (standing) |st| reasonWords(a, st) else "",
+        .version = to,
+    }) catch "" else filled(a, translated("It runs {runs}. Desktop backs it up, moves it to Publr {version}, the release Cloud runs, and starts it again."), .{
+        .runs = if (standing) |st| runsWords(a, st) else "",
+        .version = to,
+    }) catch "";
+    const description = sheet_error orelse (if (upgrade_said.len > 0) std.fmt.allocPrint(a, "{s} {s}", .{ what, upgrade_said }) catch what else what);
+    const lines: f32 = @floatFromInt(description.len / 58 + 1);
+    return .{
+        .title = title,
+        .description = description,
+        .description_height = @max(40, lines * 20),
+        .fields = &.{},
+        .primary = if (local_only) translated("Make Cloud compatible") else translated("Update"),
+        .primary_enabled = upgrade_planned and sheet_error == null,
+        .busy = sheet_busy,
+        .hover = sheet_hover,
+        .window_width = @floatCast(size.w),
+        .window_height = @floatCast(size.h),
+    };
+}
+
+/// What a site runs, as a sentence takes it: "Publr 0.7.5", or "a development build".
+fn runsWords(a: std.mem.Allocator, st: @import("sites.zig").Standing) []const u8 {
+    if (std.mem.eql(u8, st.runs, core_compat.development)) return translated("a development build");
+    return std.fmt.allocPrint(a, "Publr {s}", .{st.runs}) catch st.runs;
+}
+
+/// Why a site is local only, in Desktop's words.
+fn reasonWords(a: std.mem.Allocator, st: @import("sites.zig").Standing) []const u8 {
+    if (std.mem.eql(u8, st.runs, core_compat.development)) return translated("Made with a development build of Publr, so it cannot go to Cloud yet");
+    return filled(a, translated("Runs Publr {runs}, newer than the {version} Cloud runs"), .{
+        .runs = st.runs,
+        .version = st.cloud,
+    }) catch st.reason;
+}
+
+/// Every site measured against Cloud's release again, off the main thread (Cloud asked, a
+/// development build's database checked): at start, after an update, and hourly when Home
+/// shows. `now` asks even when the last answer is recent.
+fn checkStandings(now: bool) void {
+    if (standings_running) return;
+    if (!now and nowMs() - standings_checked_ms < standings_every_ms) return;
+    standings_running = true;
+    standings_checked_ms = nowMs();
+    platform.spawn(standingsRun, .{}) catch {
+        standings_running = false;
+    };
+}
+
+fn standingsRun() void {
+    sites.checkStandings();
+    platform.runOnMain(null, standingsDone);
+}
+
+fn standingsDone(_: ?*anyopaque) callconv(.c) void {
+    standings_running = false;
+    refreshSites();
+    redrawAll();
+}
+
 fn deploy(name: []const u8) void {
+    // A site Cloud's Publr cannot open is made Cloud compatible first.
+    if (sites.find(name)) |s| if (s.standing) |st| if (st.state == .local_only) return openUpgrade(name);
     if (cloud.status != .signed_in) {
         if (deploy_after_sign_in) |old| gpa.free(old);
         deploy_after_sign_in = gpa.dupe(u8, name) catch return;
@@ -2817,6 +3077,7 @@ fn showHome() void {
     if (active) |i| if (i < tabs.items.len) tabs.items[i].web.setVisible(false);
     active = null;
     refreshSites();
+    checkStandings(false);
     window.setBarHeight(window.size().h + 10_000); // the whole window
     window.focusApp();
     redrawAll();
@@ -2865,6 +3126,13 @@ fn projectPage(i: usize) project.State {
         thumb.* = if (key) |k| a.dupe(u8, k) catch null else null;
     }
     const waiting = kind == .both and state == .waiting and syncing.reviewOf(pt.folder) != null;
+    // A site on this Mac says where it stands against the Publr Cloud runs.
+    const standing = if (kind == .local) local.?.standing else null;
+    const version_callout: project.Callout = if (standing) |st| switch (st.state) {
+        .local_only => .local_only,
+        .update_available, .behind_cloud => .update_out,
+        .up_to_date => .none,
+    } else .none;
     return .{
         .top = bar.height,
         .width = @floatCast(size.w),
@@ -2878,13 +3146,21 @@ fn projectPage(i: usize) project.State {
         },
         .running = if (kind == .local) local.?.running else state != .failed,
         .changed = kind == .both and (state == .unsent or state == .waiting),
-        .callout = if (kind != .both) .none else switch (state) {
+        .callout = if (kind != .both) version_callout else switch (state) {
             .unsent => .unsent,
             .waiting => if (waiting) .waiting else .none,
             .failed => .failed,
             else => .none,
         },
         .failed_why = whyText(a, syncing.whyOf(pt.folder)),
+        .callout_title = if (standing) |st| switch (st.state) {
+            .local_only => reasonWords(a, st),
+            else => filled(a, translated("Publr {version} is out; this project runs {runs}"), .{
+                .version = st.cloud,
+                .runs = runsWords(a, st),
+            }) catch "",
+        } else "",
+        .local_only = standing != null and standing.?.state == .local_only,
         .address = if (pt.live.len > 0) pt.live else if (local) |s| s.address else "",
         .folder = if (local) |s| shortFolder(a, s.folder) else "",
         .pin = if (local) |s| s.pin else "",
@@ -2948,13 +3224,14 @@ fn clickProject(i: usize, target: project.Target, mods: platform.event.Mods) voi
         } else goTo(i, .{
             .app = k,
         }),
-        .callout => if (syncing.reviewOf(pt.folder) != null) openReview(pt.folder, pt.live) else syncing.send(pt.folder),
+        .callout => if (pt.live.len == 0) openUpgrade(pt.folder) else if (syncing.reviewOf(pt.folder) != null) openReview(pt.folder, pt.live) else syncing.send(pt.folder),
         .rare => |r| switch (r) {
             .clone => startClone(pt),
             .local_copy => openSite(pt.folder),
             .finder => showInFinder(pt.folder),
             .copy_path => copyPath(pt.folder),
             .deploy => deploy(pt.folder),
+            .make_compatible => openUpgrade(pt.folder),
             .dashboard => {
                 var buf: [512]u8 = undefined;
                 platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}/projects/{s}", .{ cloud.base, syncing.slugOf(pt.live) }, 0) catch return);

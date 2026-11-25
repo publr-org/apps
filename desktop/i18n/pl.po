@@ -692,3 +692,69 @@ msgstr "Sześć znaków na końcu sprawia, że każdy adres jest unikalny. Puste
 
 msgid "Edit"
 msgstr "Edytuj"
+
+msgid "{reason}. Desktop backs it up, moves it to Publr {version}, the release Cloud runs, and starts it again."
+msgstr "{reason}. Desktop zrobi kopię zapasową, przeniesie go na Publr {version}, wersję, na której działa Cloud, i uruchomi go ponownie."
+
+msgid "It runs {runs}. Desktop backs it up, moves it to Publr {version}, the release Cloud runs, and starts it again."
+msgstr "Działa na: {runs}. Desktop zrobi kopię zapasową, przeniesie go na Publr {version}, wersję, na której działa Cloud, i uruchomi go ponownie."
+
+msgid "a development build"
+msgstr "wersji deweloperskiej"
+
+msgid "Checking what changes…"
+msgstr "Sprawdzanie, co się zmieni…"
+
+msgid "Updating…"
+msgstr "Aktualizowanie…"
+
+msgid "Every project runs the Publr chosen in Settings. Choose none there, then try again."
+msgstr "Wszystkie projekty działają na Publr wybranym w Ustawieniach. Usuń ten wybór i spróbuj ponownie."
+
+msgid "It didn’t start on the new Publr, so it was put back as it was."
+msgstr "Projekt nie uruchomił się na nowym Publr, więc przywrócono go do poprzedniego stanu."
+
+msgid "Its database can’t be repaired. Nothing was changed."
+msgstr "Nie da się naprawić jego bazy danych. Niczego nie zmieniono."
+
+msgid "Its database is brought back to the shape that release expects."
+msgstr "Jego baza danych zostanie doprowadzona do kształtu, jakiego oczekuje ta wersja."
+
+msgid "Kept aside in the backup, because that release has no place for them:"
+msgstr "W kopii zapasowej zostanie odłożone to, na co ta wersja nie ma miejsca:"
+
+msgid "Local only"
+msgstr "Tylko lokalnie"
+
+msgid "Made with a development build of Publr, so it cannot go to Cloud yet"
+msgstr "Utworzony w wersji deweloperskiej Publr, więc nie może jeszcze trafić do Cloud"
+
+msgid "Make {site} Cloud compatible"
+msgstr "Przystosuj {site} do Cloud"
+
+msgid "Make Cloud compatible"
+msgstr "Przystosuj do Cloud"
+
+msgid "Make Cloud compatible…"
+msgstr "Przystosuj do Cloud…"
+
+msgid "Publr {version} is out; this project runs {runs}"
+msgstr "Dostępny jest Publr {version}; ten projekt działa na: {runs}"
+
+msgid "Runs Publr {runs}, newer than the {version} Cloud runs"
+msgstr "Działa na Publr {runs}, nowszym niż {version}, na którym działa Cloud"
+
+msgid "The Publr Cloud runs can’t repair this project yet. A later Publr release will."
+msgstr "Publr działający w Cloud nie potrafi jeszcze naprawić tego projektu. Potrafi to kolejna wersja Publr."
+
+msgid "The update didn’t work. The project is as it was."
+msgstr "Aktualizacja się nie udała. Projekt jest w poprzednim stanie."
+
+msgid "Update {site} to Publr {version}"
+msgstr "Zaktualizuj {site} do Publr {version}"
+
+msgid "Update to Publr {version}"
+msgstr "Zaktualizuj do Publr {version}"
+
+msgid "Update"
+msgstr "Aktualizuj"
