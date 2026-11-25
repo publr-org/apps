@@ -2055,7 +2055,7 @@ fn targetSpace() usize {
 }
 
 fn openNewSite() void {
-    if (active != null) showHome();
+    leaveWebPage();
     open_sheet = .new_project;
     // On the Cloud filters it starts on Cloud; anywhere else on this Mac.
     const on_cloud = view == .cloud or view == .space;
@@ -2513,9 +2513,15 @@ var standings_checked_ms: i64 = 0;
 var standings_running = false;
 const standings_every_ms: i64 = 60 * 60 * 1000;
 
+/// A sheet opens where it was asked for, over Home or a project's page, which Desktop draws
+/// itself; a tab showing a web page (an admin, a site) would cover it, so it goes to Home.
+fn leaveWebPage() void {
+    if (active) |i| if (i < tabs.items.len and webShown(tabs.items[i])) showHome();
+}
+
 fn openUpgrade(name: []const u8) void {
     if (open_sheet == .upgrade and sheet_busy != null) return;
-    // Opened where it was asked for: over the project's page, or over Home from a card.
+    leaveWebPage();
     if (upgrade_site.len > 0) gpa.free(upgrade_site);
     upgrade_site = gpa.dupe(u8, name) catch return;
     if (upgrade_said.len > 0) gpa.free(upgrade_said);
@@ -2745,7 +2751,7 @@ fn deploy(name: []const u8) void {
         return;
     }
     if (cloud.spaces.len == 0) cloud.refresh();
-    if (active != null) showHome();
+    leaveWebPage();
     // Owned: the list's names go when it is read again (after a deploy, say).
     const chosen = gpa.dupe(u8, sites.find(name).?.name) catch return;
     if (deploy_site.len > 0) gpa.free(deploy_site);
