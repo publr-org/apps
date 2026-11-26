@@ -91,7 +91,9 @@ jobs:
       matrix:
         include:
           - { runner: blacksmith-12vcpu-macos-15, os: macos, cpu: aarch64 }
-          - { runner: blacksmith-12vcpu-macos-15, os: macos, cpu: x86_64 }
+          # Blacksmith's Macs are Apple silicon: an Intel build, and the compiler it carries, need an
+          # Intel Mac.
+          - { runner: macos-15-intel, os: macos, cpu: x86_64 }
     runs-on: ${{ matrix.runner }}
     env: { VERSION: "${{ needs.version.outputs.version }}" }
     steps:
