@@ -2,7 +2,20 @@ const std = @import("std");
 const platform_build = @import("platform");
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
+    // Built on a Mac, Desktop opens on macOS 15 and later (Zig 0.17's oldest), as its
+    // Info.plist says: a native build would otherwise require the build machine's own version.
+    const on_mac = @import("builtin").os.tag == .macos;
+    const target = b.standardTargetOptions(.{
+        .default_target = if (on_mac) .{
+            .os_version_min = .{
+                .semver = .{
+                    .major = 15,
+                    .minor = 0,
+                    .patch = 0,
+                },
+            },
+        } else .{},
+    });
     const optimize = b.standardOptimizeOption(.{});
     const platform = b.dependency("platform", .{
         .target = target,

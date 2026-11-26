@@ -40,6 +40,7 @@ pub fn build(b: *std.Build) void {
         }},
     });
     for ([_][]const u8{ "AppKit", "WebKit", "QuartzCore", "CoreGraphics", "Security" }) |f| platform.linkFramework(f, .{});
+    with_sdk(b, target, wgpu_c, &.{ wgpu, platform });
 
     // Our own-drawn UI, on PublrEngine: boxes, text, icons, and their frame on a GPU surface.
     const engine = b.dependency("publr_engine", .{
@@ -186,7 +187,7 @@ fn add_web(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builti
 pub const BundleOptions = struct {
     version: []const u8 = "0.0.0",
     /// The oldest macOS it runs on (the display link needs 14).
-    min_macos: []const u8 = "14.0",
+    min_macos: []const u8 = "15.0",
     /// The app's icon, an `.icns` file; the system's blank one when null.
     icon: ?std.Build.LazyPath = null,
 };
@@ -264,4 +265,31 @@ pub fn addAppBundle(
     }
 
     return step;
+}
+
+/// A Mac build for a minimum macOS other than this Mac's own is not native to Zig, which then
+/// leaves out the SDK: its frameworks, headers and libraries are added from Xcode's.
+fn with_sdk(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    translate: *std.Build.Step.TranslateC,
+    modules: []const *std.Build.Module,
+) void {
+    if (target.result.os.tag != .macos or target.query.isNativeOs()) {
+        return;
+    }
+
+    const sdk = std.zig.system.darwin.getSdk(b.allocator, b.graph.io, &target.result) orelse
+        @panic("the macOS SDK was not found: install Xcode or its command line tools");
+    const frameworks = b.pathJoin(&.{ sdk, "System/Library/Frameworks" });
+    const headers = b.pathJoin(&.{ sdk, "usr/include" });
+    const libraries = b.pathJoin(&.{ sdk, "usr/lib" });
+
+    translate.addSystemIncludePath(.{ .cwd_relative = headers });
+
+    for (modules) |module| {
+        module.addSystemFrameworkPath(.{ .cwd_relative = frameworks });
+        module.addSystemIncludePath(.{ .cwd_relative = headers });
+        module.addLibraryPath(.{ .cwd_relative = libraries });
+    }
 }
