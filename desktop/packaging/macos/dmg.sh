@@ -73,9 +73,9 @@ fi
 
 echo "==> Building $NAME $VERSION"
 if [ -n "${PUBLR_TOOLCHAIN_ARCHIVE:-}" ]; then
-    zig build app -Doptimize=safe -Dtoolchain-archive="$PUBLR_TOOLCHAIN_ARCHIVE"
+    zig build app -Doptimize=safe -Drelease -Dtoolchain-archive="$PUBLR_TOOLCHAIN_ARCHIVE"
 else
-    zig build app -Doptimize=safe
+    zig build app -Doptimize=safe -Drelease
 fi
 
 echo "==> Signing with: $IDENTITY"

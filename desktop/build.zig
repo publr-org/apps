@@ -81,7 +81,7 @@ pub fn build(b: *std.Build) void {
     // Beside Desktop in zig-out/bin too, so `zig build run` finds it as the app does.
     b.installArtifact(cli.artifact("publr"));
     const app = platform_build.addAppBundle(b, exe, "Publr Desktop", "app.publr.desktop", .{
-        .version = @import("build.zig.zon").version,
+        .version = shown_version(b),
         .icon = b.path("assets/AppIcon.icns"),
     });
     const bundled = b.addInstallArtifact(cli.artifact("publr"), .{
@@ -121,6 +121,22 @@ pub fn build(b: *std.Build) void {
     b.step("run", "Open Publr Desktop").dependOn(&run.step);
 
     add_web(b, optimize);
+}
+
+/// The version About shows: build.zig.zon's for a release (`-Drelease`, which `dmg.sh`
+/// passes); any other build adds `-dev+<commit>`, so it is never taken for that release.
+fn shown_version(b: *std.Build) []const u8 {
+    const version = @import("build.zig.zon").version;
+    const release = b.option(bool, "release", "A release build: About shows the bare version") orelse false;
+
+    if (release) {
+        return version;
+    }
+
+    var code: u8 = 0;
+    const commit = b.runAllowFail(&.{ "git", "rev-parse", "--short", "HEAD" }, &code, .ignore) catch "unknown";
+
+    return b.fmt("{s}-dev+{s}", .{ version, std.mem.trim(u8, commit, " \n") });
 }
 
 /// `build_info.version`: build.zig.zon's, the version Desktop says it is and updates from.
