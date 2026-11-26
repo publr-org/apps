@@ -36,7 +36,7 @@ env:
 
 jobs:
   version:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     outputs:
       version: ${{ steps.next.outputs.version }}
       icons: ${{ steps.commits.outputs.icons }}
@@ -90,8 +90,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - { runner: macos-latest, os: macos, cpu: aarch64 }
-          - { runner: macos-15-intel, os: macos, cpu: x86_64 }
+          - { runner: blacksmith-12vcpu-macos-15, os: macos, cpu: aarch64 }
+          - { runner: blacksmith-12vcpu-macos-15, os: macos, cpu: x86_64 }
     runs-on: ${{ matrix.runner }}
     env: { VERSION: "${{ needs.version.outputs.version }}" }
     steps:
@@ -157,7 +157,7 @@ jobs:
 
   release:
     needs: [version, build]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TAG: desktop-v${{ needs.version.outputs.version }}
