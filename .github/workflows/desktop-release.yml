@@ -152,6 +152,19 @@ jobs:
           packaging/macos/dmg.sh --no-sums
           test -f "dist/Publr-Desktop-$VERSION-macos-${{ matrix.cpu }}.dmg"
 
+      # Every program in the app is built for this CPU and opens on macOS 15 and later: a build
+      # that needs a newer macOS, or the wrong CPU, never reaches anyone's updates.
+      - name: Its CPU and oldest macOS
+        if: matrix.os == 'macos'
+        working-directory: apps/desktop
+        run: |
+          arch=$([ "${{ matrix.cpu }}" = aarch64 ] && echo arm64 || echo x86_64)
+          for program in "dist/stage/Publr Desktop.app/Contents/MacOS/"*; do
+            file -b "$program" | grep -q "$arch" || { echo "::error::$program is not $arch"; exit 1; }
+            minos=$(vtool -show-build "$program" | awk '/minos/ { print $2 }')
+            [ "$minos" = 15.0 ] || { echo "::error::$program needs macOS $minos, not 15.0"; exit 1; }
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.os }}-${{ matrix.cpu }}

@@ -4065,6 +4065,7 @@ fn updateLine() []const u8 {
         .downloading => fill(buffer, translated("Downloading {version}…"), .{ .version = updater.newer }),
         .ready => fill(buffer, translated("{version} is ready. Restart Publr Desktop to use it."), .{ .version = updater.newer }),
         .available => fill(buffer, translated("{version} is out. Download it, then replace this app with it."), .{ .version = updater.newer }),
+        .unsupported => fill(buffer, translated("{version} is out, but it needs macOS {needs}. This Mac has {has}, so this version stays."), .{ .version = updater.newer, .needs = updater.needs, .has = updater.has }),
         .failed => translated("Couldn’t check for updates. Check your connection, then try again."),
     };
 }

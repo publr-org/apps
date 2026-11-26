@@ -44,6 +44,8 @@ pub const State = enum {
     ready,
     /// A newer release is out, and this app cannot be replaced from here.
     available,
+    /// A newer release is out, but it needs a newer macOS than this Mac's: not installed.
+    unsupported,
     failed,
 };
 
@@ -56,6 +58,9 @@ pub const Updater = struct {
     newer: []const u8 = "",
     /// What went wrong last, for the log.
     problem: []const u8 = "",
+    /// The macOS the newer release needs, and this Mac's, when it needs a newer one.
+    needs: []const u8 = "",
+    has: []const u8 = "",
     /// This app's folder (`/Applications/Publr Desktop.app`); empty when not run as an app.
     bundle: []const u8 = "",
     /// Called on the main thread when the state changes.
@@ -185,7 +190,10 @@ fn take(self: *Updater, arena: std.mem.Allocator) !State {
         return error.NotVerified;
     }
 
-    try install(self, arena, files[0]);
+    install(self, arena, files[0]) catch |e| switch (e) {
+        error.NeedsNewerMacOS => return .unsupported,
+        else => return e,
+    };
     return .ready;
 }
 
@@ -251,6 +259,9 @@ fn install(self: *Updater, arena: std.mem.Allocator, image: []const u8) !void {
         "/usr/bin/codesign",                                                             "--verify", "--deep", "--strict",
         "-R=anchor apple generic and certificate leaf[subject.OU] = \"" ++ team ++ "\"", fresh,
     });
+
+    // Built for a newer macOS than this Mac's, it would not open: kept out, this app stays.
+    try supported(self, arena, fresh);
 
     const aside = try sibling(arena, self.bundle, ".old");
     try cwd.deleteTree(self.io, aside);
@@ -332,4 +343,84 @@ test sibling {
     const got = try sibling(gpa, "/Applications/Publr Desktop.app", ".new");
     defer gpa.free(got);
     try std.testing.expectEqualStrings("/Applications/.Publr Desktop.new.app", got);
+}
+
+/// Every program in `app` (`Contents/MacOS`) opens on this Mac: none needs a newer macOS than
+/// it runs. Read from the programs themselves, as macOS does when it opens them, not from
+/// Info.plist, which a build can get wrong.
+fn supported(self: *Updater, arena: std.mem.Allocator, app: []const u8) !void {
+    const has = try macosVersion();
+    const programs = try std.fs.path.join(arena, &.{ app, "Contents", "MacOS" });
+    var dir = try std.Io.Dir.cwd().openDir(self.io, programs, .{ .iterate = true });
+    defer dir.close(self.io);
+    var it = dir.iterate();
+    while (try it.next(self.io)) |entry| {
+        if (entry.kind != .file) continue;
+        const bytes = try dir.readFileAlloc(self.io, entry.name, arena, .limited(image_bytes_max));
+        const needs = minimumOf(bytes) orelse continue;
+        if (needs.order(has) == .gt) {
+            self.needs = try std.fmt.allocPrint(self.gpa, "{d}.{d}", .{ needs.major, needs.minor });
+            self.has = try std.fmt.allocPrint(self.gpa, "{d}.{d}", .{ has.major, has.minor });
+            return error.NeedsNewerMacOS;
+        }
+    }
+}
+
+/// This Mac's macOS version (`kern.osproductversion`: 26.2).
+fn macosVersion() !std.SemanticVersion {
+    var buffer: [32]u8 = undefined;
+    var len: usize = buffer.len;
+    if (std.c.sysctlbyname("kern.osproductversion", &buffer, &len, null, 0) != 0) return error.UnknownMacOS;
+    const text = std.mem.sliceTo(buffer[0..len], 0);
+    return parseMacOS(text) orelse error.UnknownMacOS;
+}
+
+/// `26`, `26.2` or `26.2.1` as a version, the parts left out zero.
+fn parseMacOS(text: []const u8) ?std.SemanticVersion {
+    var parts = std.mem.splitScalar(u8, text, '.');
+    var numbers: [3]usize = .{ 0, 0, 0 };
+    for (&numbers) |*n| {
+        const part = parts.next() orelse break;
+        n.* = std.fmt.parseInt(usize, part, 10) catch return null;
+    }
+    return .{ .major = numbers[0], .minor = numbers[1], .patch = numbers[2] };
+}
+
+/// The oldest macOS a 64-bit Mach-O program opens on (LC_BUILD_VERSION, or the older
+/// LC_VERSION_MIN_MACOSX); null for anything else.
+fn minimumOf(bytes: []const u8) ?std.SemanticVersion {
+    const header_len = 32;
+    if (bytes.len < header_len) return null;
+    if (std.mem.readInt(u32, bytes[0..4], .little) != 0xfeedfacf) return null;
+    const commands = std.mem.readInt(u32, bytes[16..20], .little);
+    var at: usize = header_len;
+    for (0..commands) |_| {
+        if (at + 16 > bytes.len) return null;
+        const command = std.mem.readInt(u32, bytes[at..][0..4], .little);
+        const size = std.mem.readInt(u32, bytes[at + 4 ..][0..4], .little);
+        const encoded = switch (command) {
+            0x32 => std.mem.readInt(u32, bytes[at + 12 ..][0..4], .little),
+            0x24 => std.mem.readInt(u32, bytes[at + 8 ..][0..4], .little),
+            else => null,
+        };
+        if (encoded) |v| return .{ .major = v >> 16, .minor = (v >> 8) & 0xff, .patch = v & 0xff };
+        if (size < 8) return null;
+        at += size;
+    }
+    return null;
+}
+
+test "a program's minimum macOS is read from its build version" {
+    var bytes: [56]u8 = @splat(0);
+    std.mem.writeInt(u32, bytes[0..4], 0xfeedfacf, .little);
+    std.mem.writeInt(u32, bytes[16..20], 1, .little);
+    std.mem.writeInt(u32, bytes[32..36], 0x32, .little);
+    std.mem.writeInt(u32, bytes[36..40], 24, .little);
+    std.mem.writeInt(u32, bytes[44..48], (26 << 16) | (7 << 8) | 2, .little);
+    const needs = minimumOf(&bytes).?;
+    try std.testing.expectEqual(@as(usize, 26), needs.major);
+    try std.testing.expectEqual(@as(usize, 7), needs.minor);
+    try std.testing.expect(needs.order(parseMacOS("26.2").?) == .gt);
+    try std.testing.expect(parseMacOS("15.0").?.order(parseMacOS("26.2").?) == .lt);
+    try std.testing.expect(minimumOf("not a program") == null);
 }
