@@ -36,6 +36,8 @@ pub const init = backend.init;
 /// Runs the event loop until the last window closes or `quit`.
 pub const run = backend.run;
 pub const quit = backend.quit;
+/// Called once as the app quits, before the process ends.
+pub const onQuit = backend.onQuit;
 /// App menus with items of the app's own: `setMenu`, chosen items to `onMenu`.
 pub const MenuItem = backend.MenuItem;
 pub const setMenu = backend.setMenu;

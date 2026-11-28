@@ -306,6 +306,7 @@ pub fn main(init: std.process.Init) !void {
 
     platform.init(app_name);
     platform.onMenu(null, onMenu);
+    platform.onQuit(stopStartedHere);
     buildMenus();
     theme = themeFor(platform.appearance());
     // `DESKTOP_THEME=light|dark`: one look whatever the system says (for screenshots).
@@ -1712,7 +1713,6 @@ fn goTo(i: usize, page: project.Page) void {
 fn siteOf(pt: *const ProjectTab) []const u8 {
     if (pt.live.len > 0) return pt.live;
     const s = sites.find(pt.folder) orelse return "";
-    if (!s.running) sites.start(pt.folder);
     return s.address;
 }
 
@@ -1798,6 +1798,7 @@ fn sitePageAt(i: usize, address: []const u8) void {
     const rest = address[std.mem.indexOf(u8, address, "://").? + 3 ..];
     const path = if (std.mem.indexOfScalar(u8, rest, '/')) |at| rest[at..] else "/";
     if (pt.live.len == 0) {
+        if (stoppedHere(pt.folder)) return showStopped(t.web);
         const job = gpa.create(SignIn) catch return;
         job.* = .{
             .name = t.name,
@@ -1823,6 +1824,7 @@ fn adminAt(i: usize, path: []const u8, direct: ?[]const u8) void {
     pt.page = .admin;
     showTab(i);
     if (pt.live.len == 0) {
+        if (stoppedHere(pt.folder)) return showStopped(t.web);
         const job = gpa.create(SignIn) catch return;
         job.* = .{
             .name = t.name,
@@ -1911,41 +1913,16 @@ fn openLocal(name: []const u8) void {
     openProjectTab(name, name, s.live, spaceOf(s.live));
 }
 
-/// A site on this Mac in the browser: a linked folder's live site; any other's own, started
-/// first when stopped (off the main thread, then back to it).
+/// A site on this Mac in the browser: a linked folder's live site; any other's own. A stopped
+/// site opens in its tab instead, where the person starts it.
 fn viewInBrowser(name: []const u8) void {
     const s = sites.find(name) orelse return;
     rememberRecent(name);
     var buf: [512]u8 = undefined;
     if (s.live.len > 0) return platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.live}, 0) catch return);
-    if (s.running) return platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.address}, 0) catch return);
-    const job = gpa.create(ViewSite) catch return;
-    job.* = .{
-        .name = gpa.dupe(u8, name) catch return gpa.destroy(job),
-        .address = gpa.dupeSentinel(u8, s.address, 0) catch return gpa.destroy(job),
-    };
-    platform.spawn(ViewSite.run, .{job}) catch return;
+    if (!s.running) return openSite(name);
+    platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{s.address}, 0) catch return);
 }
-
-const ViewSite = struct {
-    name: []const u8,
-    address: [:0]const u8,
-
-    fn run(self: *ViewSite) void {
-        sites.start(self.name);
-        platform.runOnMain(self, opened);
-    }
-
-    fn opened(ctx: ?*anyopaque) callconv(.c) void {
-        const self: *ViewSite = @ptrCast(@alignCast(ctx));
-        defer gpa.destroy(self);
-        defer gpa.free(self.name);
-        defer gpa.free(self.address);
-        platform.openInBrowser(self.address);
-        refreshSites();
-        redrawAll();
-    }
-};
 
 fn act(name: []const u8, tag: u32) void {
     const s = sites.find(name) orelse return;
@@ -1987,6 +1964,7 @@ fn onMessage(_: ?*anyopaque, web: *platform.WebView, text: []const u8) void {
     // The page moved: the address bar says where it is now.
     if (std.mem.eql(u8, text, location_message)) return redrawAll();
     if (std.mem.startsWith(u8, text, link_message)) return followLink(web, text[link_message.len..]);
+    if (std.mem.eql(u8, text, start_message)) return startFrom(web);
     if (timing_site == null) return;
     std.debug.print("page {s}\n", .{text});
     // The sign-in link lands on /admin first; then each page in turn.
@@ -3372,8 +3350,6 @@ fn openSite(name: []const u8) void {
     // A folder linked to Cloud has two tabs of the same name: this one is the local admin's.
     for (tabs.items, 0..) |t, i| if (t.url == null and t.project == null and std.mem.eql(u8, t.name, name)) return showTab(i);
     const web = window.addWebView() catch return;
-    var page: [1024]u8 = undefined;
-    web.loadHtml(std.fmt.bufPrintSentinel(&page, starting_page, .{translated("Starting the site…")}, 0) catch "");
     const owned = gpa.dupe(u8, name) catch return;
     tabs.append(gpa, .{
         .name = owned,
@@ -3382,13 +3358,9 @@ fn openSite(name: []const u8) void {
     showTab(tabs.items.len - 1);
     saveOpenSites();
 
-    // `p open` starts the server when it is stopped: off the main thread, then back to it.
-    const job = gpa.create(SignIn) catch return;
-    job.* = .{
-        .name = owned,
-        .web = web,
-    };
-    platform.spawn(SignIn.run, .{job}) catch return;
+    // A stopped site stays stopped until the person starts it from the tab.
+    if (stoppedHere(name)) return showStopped(web);
+    signInTab(owned, web);
 }
 
 fn closeTab(i: usize) void {
@@ -3410,6 +3382,83 @@ fn closeTab(i: usize) void {
         active = if (a > i) a - 1 else a;
     }
     redrawAll();
+}
+
+/// A tab's page while its site is stopped: nothing starts until the person asks. `{s}` are
+/// the words, then the button's, in the person's language.
+const stopped_page =
+    \\<!doctype html><meta charset=utf-8>
+    \\<body style="margin:0;height:100vh;display:grid;place-items:center;font:13px -apple-system,sans-serif;color:#888;background:#fff">
+    \\<div style="display:grid;gap:12px;justify-items:center"><p style="margin:0">{s}</p>
+    \\<button onclick="webkit.messageHandlers.native.postMessage('desktop:start')" style="font:inherit;font-weight:500;padding:6px 14px;border-radius:6px;border:0;background:#111;color:#fff;cursor:pointer">{s}</button></div>
+;
+const start_message = "desktop:start";
+
+/// Whether `name` is a site on this Mac whose server is stopped.
+fn stoppedHere(name: []const u8) bool {
+    const s = sites.find(name) orelse return false;
+    return !s.running;
+}
+
+fn showStopped(web: *platform.WebView) void {
+    var page: [2048]u8 = undefined;
+    const words = .{ translated("This site is stopped."), translated("Start") };
+    web.loadHtml(std.fmt.bufPrintSentinel(&page, stopped_page, words, 0) catch return);
+}
+
+/// The stopped page's Start: the tab's site started off the main thread, then the tab
+/// shows what it was opened on.
+fn startFrom(web: *platform.WebView) void {
+    for (tabs.items) |t| if (t.web == web) {
+        const name = if (t.project) |pt| pt.folder else t.name;
+        if (name.len == 0) return;
+        var page: [1024]u8 = undefined;
+        web.loadHtml(std.fmt.bufPrintSentinel(&page, starting_page, .{translated("Starting the site…")}, 0) catch "");
+        const job = gpa.create(StartJob) catch return;
+        job.* = .{
+            .name = gpa.dupe(u8, name) catch return gpa.destroy(job),
+            .web = web,
+        };
+        platform.spawn(StartJob.run, .{job}) catch return;
+        return;
+    };
+}
+
+const StartJob = struct {
+    name: []const u8,
+    web: *platform.WebView,
+
+    fn run(self: *StartJob) void {
+        sites.start(self.name);
+        platform.runOnMain(self, started);
+    }
+
+    fn started(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *StartJob = @ptrCast(@alignCast(ctx));
+        defer gpa.destroy(self);
+        defer gpa.free(self.name);
+        refreshSites();
+        redrawAll();
+        // The tab may have closed while the server started.
+        for (tabs.items, 0..) |t, i| if (t.web == self.web) {
+            if (t.project) |pt| return goTo(i, pt.page);
+            return signInTab(t.name, t.web);
+        };
+    }
+};
+
+/// The sites Desktop started, stopped as it quits.
+fn stopStartedHere() void {
+    sites.stopStarted();
+}
+
+fn signInTab(name: []const u8, web: *platform.WebView) void {
+    const job = gpa.create(SignIn) catch return;
+    job.* = .{
+        .name = name,
+        .web = web,
+    };
+    platform.spawn(SignIn.run, .{job}) catch return;
 }
 
 /// A tab's page while its site starts; `{s}` is the words, in the person's language.

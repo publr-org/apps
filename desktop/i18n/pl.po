@@ -348,6 +348,9 @@ msgstr "Na żywo w Cloud"
 msgid "Starting the site…"
 msgstr "Uruchamianie projektu…"
 
+msgid "This site is stopped."
+msgstr "Ten projekt jest zatrzymany."
+
 msgid "Clone failed"
 msgstr "Klonowanie nie powiodło się"
 

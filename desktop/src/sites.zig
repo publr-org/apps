@@ -49,6 +49,10 @@ pub const Sites = struct {
     list: std.ArrayList(Site) = .empty,
     /// The default folder, where New project puts sites.
     folder: []const u8 = "",
+    /// Sites Desktop started since it opened, from any thread: stopped again as it quits. A
+    /// site started any other way (the `publr` command, before Desktop opened) is left running.
+    started: std.ArrayList([]const u8) = .empty,
+    started_lock: std.Io.Mutex = .init,
 
     /// Lists the sites again.
     pub fn refresh(self: *Sites) void {
@@ -168,7 +172,9 @@ pub const Sites = struct {
         const config = try core.Config.load(self.io, arena.allocator(), self.env);
         var site = try locate(&config, name);
         const publr = try core.versions.binary_for(&config, site);
+        const was_running = core.server.running(self.io, site);
         try core.server.start(&config, &site, publr);
+        if (!was_running) self.noteStarted(name);
         try core.helper.ensure(&config, self.command_path);
         return self.gpa.dupeSentinel(u8, try core.sign_on.entry(&config, &site, publr, path), 0);
     }
@@ -201,6 +207,7 @@ pub const Sites = struct {
             std.debug.print("desktop: new site {s}: {t}\n", .{ name, e });
             return false;
         };
+        self.noteStarted(name);
         return true;
     }
 
@@ -230,8 +237,27 @@ pub const Sites = struct {
         const publr = core.versions.binary_for(&config, site) catch |e| {
             return std.debug.print("desktop: {s}'s Publr: {t}\n", .{ name, e });
         };
-        core.server.start(&config, &site, publr) catch |e| std.debug.print("desktop: starting {s}: {t}\n", .{ name, e });
+        const was_running = core.server.running(self.io, site);
+        core.server.start(&config, &site, publr) catch |e| {
+            return std.debug.print("desktop: starting {s}: {t}\n", .{ name, e });
+        };
+        if (!was_running) self.noteStarted(name);
         core.helper.ensure(&config, self.command_path) catch {};
+    }
+
+    fn noteStarted(self: *Sites, name: []const u8) void {
+        self.started_lock.lockUncancelable(self.io);
+        defer self.started_lock.unlock(self.io);
+        for (self.started.items) |held| if (std.mem.eql(u8, held, name)) return;
+        const owned = self.gpa.dupe(u8, name) catch return;
+        self.started.append(self.gpa, owned) catch self.gpa.free(owned);
+    }
+
+    /// Stops every site Desktop started, as it quits.
+    pub fn stopStarted(self: *Sites) void {
+        self.started_lock.lockUncancelable(self.io);
+        defer self.started_lock.unlock(self.io);
+        for (self.started.items) |name| self.stop(name);
     }
 
     pub fn stop(self: *Sites, name: []const u8) void {

@@ -118,6 +118,9 @@ const recheck_ms: i64 = 60_000;
 /// `publr pull`'s exit codes (`publr/src/server/clone/pull.zig`).
 const signed_out_code: u8 = 3;
 const own_work_code: u8 = 4;
+/// The longest a pull or push runs, and a check or sign-in, before it is ended.
+const transfer_s_max: i64 = 30 * 60;
+const asked_s_max: i64 = 2 * 60;
 
 const Command = enum { check, pull, push, login, media };
 
@@ -156,19 +159,32 @@ const Job = struct {
             .media => &.{ shared.publr, "pull", "--media" },
             .login => &.{ shared.publr, "login", job.site, "--sign-on", job.token },
         };
-        const result = try std.process.run(a, shared.io, .{
+        // A server that stops answering mid-transfer would hold the command forever: it is
+        // ended after its time, and the job fails as any other would.
+        const limit_s: i64 = if (job.command == .pull or job.command == .push) transfer_s_max else asked_s_max;
+        if (std.process.run(a, shared.io, .{
             .argv = argv,
             .cwd = .{
                 .path = job.dir,
             },
             .environ_map = shared.env,
-        });
-        defer a.free(result.stderr);
-        job.out = result.stdout;
-        job.exit = if (result.term == .exited) result.term.exited else 255;
-        if (job.exit != 0) {
-            std.debug.print("desktop: publr {t} in {s}: {s}\n", .{ job.command, job.name, result.stderr });
-            job.why = try a.dupe(u8, reasonOf(result.stderr));
+            .timeout = .{
+                .duration = .{
+                    .raw = .fromSeconds(limit_s),
+                    .clock = .awake,
+                },
+            },
+        })) |result| {
+            defer a.free(result.stderr);
+            job.out = result.stdout;
+            job.exit = if (result.term == .exited) result.term.exited else 255;
+            if (job.exit != 0) {
+                std.debug.print("desktop: publr {t} in {s}: {s}\n", .{ job.command, job.name, result.stderr });
+                job.why = try a.dupe(u8, reasonOf(result.stderr));
+            }
+        } else |e| {
+            std.debug.print("desktop: publr {t} in {s}: {t}\n", .{ job.command, job.name, e });
+            job.why = try a.dupe(u8, if (e == error.Timeout) "Cloud stopped answering" else @errorName(e));
         }
         // Stopped for the pull, running again after it, whatever it did.
         if (job.stop_first) {

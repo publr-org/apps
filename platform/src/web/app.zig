@@ -290,6 +290,11 @@ pub fn activate() void {}
 
 pub fn quit() void {}
 
+/// A page is never quit: it is closed, and nothing runs then.
+pub fn onQuit(handler: *const fn () void) void {
+    _ = handler;
+}
+
 pub fn onMenu(ctx: ?*anyopaque, handler: *const fn (ctx: ?*anyopaque, tag: u32) void) void {
     menu_ctx = ctx;
     menu_handler = handler;

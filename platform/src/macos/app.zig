@@ -617,6 +617,7 @@ pub fn init(app_name: [:0]const u8) void {
     classes.menu_target_instance = objc.msg(MenuTarget, "new");
     const AppDelegate = objc.makeClass("NSObject", "NativeAppDelegate", &.{
         .{ "applicationShouldTerminateAfterLastWindowClosed:", @ptrCast(&yes1), "c@:@" },
+        .{ "applicationWillTerminate:", @ptrCast(&onWillTerminate), "v@:@" },
         .{ "nativeAppearanceChanged:", @ptrCast(&onAppearanceChanged), "v@:@" },
     });
     classes.app_delegate_instance = objc.msg(AppDelegate, "new");
@@ -672,6 +673,18 @@ pub fn activate() void {
 
 pub fn quit() void {
     _ = objc.msgId(objc.msg(objc.class("NSApplication"), "sharedApplication"), "terminate:", null);
+}
+
+var quit_handler: ?*const fn () void = null;
+
+/// Called once as the app quits, however it quits (the menu, Command-Q, the last window,
+/// `quit`), before the process ends: AppKit never returns from `run`.
+pub fn onQuit(handler: *const fn () void) void {
+    quit_handler = handler;
+}
+
+fn onWillTerminate(_: id, _: SEL, _: id) callconv(.c) void {
+    if (quit_handler) |handler| handler();
 }
 
 /// An item of an app menu (`setMenu`).
