@@ -77,6 +77,7 @@ pub const Page = union(enum) {
 
 /// The rare things, in the "more" menu.
 pub const Rare = enum {
+    rename,
     clone,
     finder,
     copy_path,
@@ -88,6 +89,7 @@ pub const Rare = enum {
 
     fn label(r: Rare) []const u8 {
         return switch (r) {
+            .rename => translated("Rename\u{2026}"),
             .clone => translated("Clone to this Mac"),
             .finder => translated("Show in Finder"),
             .copy_path => translated("Copy path"),
@@ -100,6 +102,7 @@ pub const Rare = enum {
 
     fn icon(r: Rare) []const u8 {
         return switch (r) {
+            .rename => icons.edit,
             .clone => icons.device_desktop,
             .finder => icons.folder,
             .copy_path => icons.copy,
@@ -628,6 +631,10 @@ pub fn maxScroll(s: State) f32 {
 
 fn rareList(s: State, out: *[7]Rare) []const Rare {
     var n: usize = 0;
+    if (!s.cloning) {
+        out[n] = .rename;
+        n += 1;
+    }
     if (s.kind == .cloud and !s.cloning) {
         out[n] = .clone;
         n += 1;

@@ -74,6 +74,8 @@ const Action = struct {
     const open_dashboard = 21;
     const sign_out = 22;
     const settings = 23;
+    // Any project's: its name on Cloud, or its folder's on this Mac.
+    const rename = 24;
 };
 
 /// What a Home item is.
@@ -178,6 +180,8 @@ var open_sheet: ?enum {
     edit_app,
     /// An app's removal, from its card's Remove.
     remove_app,
+    /// A project's new name, from its menu's Rename.
+    rename,
     /// Update, or Make Cloud compatible: a site moved to the Publr Cloud runs.
     upgrade,
 } = null;
@@ -186,6 +190,17 @@ var app_tab: usize = 0;
 var app_index: usize = 0;
 var app_label_field: ui.TextField = undefined;
 var app_path_field: ui.TextField = undefined;
+/// What the rename sheet renames: a project on Cloud (its slug; a folder linked to it is
+/// renamed there), or a site only on this Mac (its folder's name). Owned by `gpa`.
+var rename_target: union(enum) {
+    cloud: []const u8,
+    local: []const u8,
+} = .{
+    .local = "",
+};
+/// Its name when the sheet opened, for the title and to tell a change.
+var rename_current: []const u8 = "";
+var rename_field: ui.TextField = undefined;
 /// Which language the language sheet chooses, and the option picked in it.
 var language_of: enum { app, projects } = .app;
 var language_pick: usize = 0;
@@ -329,6 +344,7 @@ pub fn main(init: std.process.Init) !void {
     slug_field = .init(gpa);
     app_label_field = .init(gpa);
     app_path_field = .init(gpa);
+    rename_field = .init(gpa);
     address_field = .init(gpa);
     admin_field = .init(gpa);
     cloud = .init(gpa, io, env.get("DESKTOP_CLOUD") orelse "https://cloud.publr.app", cloudChanged);
@@ -733,7 +749,7 @@ fn addLocal(a: std.mem.Allocator, name: []const u8) void {
     var kb: [256]u8 = undefined;
     const thumb = if (thumbs.key(&kb, s.name)) |k| a.dupe(u8, k) catch null else null;
     items.append(gpa, .{
-        .name = s.name,
+        .name = shownName(s),
         .detail = detail,
         .kind = if (linked) .both else .local,
         .running = if (linked) state != .failed else s.running,
@@ -1007,6 +1023,10 @@ fn projectMenu() []const home.MenuItem {
             .separator = true,
         },
         .{
+            .title = translated("Rename\u{2026}"),
+            .tag = Action.rename,
+        },
+        .{
             .title = translated("Open in dashboard"),
             .tag = Action.project_dashboard,
         },
@@ -1075,6 +1095,10 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
                 .tag = Action.copy_path,
             },
             .{
+                .title = translated("Rename\u{2026}"),
+                .tag = Action.rename,
+            },
+            .{
                 .separator = true,
             },
             .{
@@ -1117,6 +1141,10 @@ fn siteMenu(name: []const u8) []const home.MenuItem {
         .{
             .title = translated("Copy path"),
             .tag = Action.copy_path,
+        },
+        .{
+            .title = translated("Rename\u{2026}"),
+            .tag = Action.rename,
         },
         if (s.running) .{
             .title = translated("Stop"),
@@ -1346,6 +1374,9 @@ fn actProject(space: usize, k: usize, tag: u32) void {
         Action.open_project => openProject(space, k),
         Action.view_live => platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}", .{p.address}, 0) catch return),
         Action.project_dashboard => platform.openInBrowser(std.fmt.bufPrintSentinel(&buf, "{s}/projects/{s}", .{ cloud.base, p.slug }, 0) catch return),
+        Action.rename => openRename(.{
+            .cloud = p.slug,
+        }, p.name),
         else => {},
     }
 }
@@ -1551,6 +1582,199 @@ fn appChangedOnCloud(problem: ?[]const u8) void {
     if (sheetApp()) |found| startRemote(.apps, found[0].live, "");
     closeSheet();
 }
+
+// A project's Rename: one on Cloud (or a folder linked to it) is renamed on Cloud, its address
+// unchanged, and reads its new name from there; a site only on this Mac takes the new name as
+// its folder's, as `publr rename` does.
+
+/// The Cloud project a folder on this Mac is the working copy of, while Cloud lists it.
+fn cloudProjectOf(live: []const u8) ?@import("cloud.zig").Project {
+    if (live.len == 0) return null;
+    for (cloud.spaces) |sp| for (sp.projects) |p| {
+        if (std.mem.eql(u8, hostOf(p.address), hostOf(live))) return p;
+    };
+    return null;
+}
+
+/// A site's name as people see it: a linked folder's is its Cloud project's.
+fn shownName(s: sites_module.Site) []const u8 {
+    const p = cloudProjectOf(s.live) orelse return s.name;
+    return p.name;
+}
+
+/// Rename for the site `name` on this Mac: on Cloud when it is linked there.
+fn renameLocal(name: []const u8) void {
+    const s = sites.find(name) orelse return;
+    if (s.live.len == 0) return openRename(.{
+        .local = name,
+    }, name);
+    // A linked folder Cloud does not list (signed out, or another account's): nothing to
+    // rename it on.
+    const p = cloudProjectOf(s.live) orelse return;
+    openRename(.{
+        .cloud = p.slug,
+    }, p.name);
+}
+
+fn openRename(target: @TypeOf(rename_target), current: []const u8) void {
+    switch (rename_target) {
+        inline else => |held| if (held.len > 0) gpa.free(held),
+    }
+    if (rename_current.len > 0) gpa.free(rename_current);
+    rename_target = switch (target) {
+        .cloud => |slug| .{
+            .cloud = gpa.dupe(u8, slug) catch return,
+        },
+        .local => |name| .{
+            .local = gpa.dupe(u8, name) catch return,
+        },
+    };
+    rename_current = gpa.dupe(u8, current) catch "";
+    rename_field.set(current);
+    open_sheet = .rename;
+    sheet_focus = 0;
+    sheet_error = null;
+    sheet_busy = null;
+    sheet_hover = .none;
+    window.setTextInput(true);
+    redrawAll();
+}
+
+/// The name typed, and why it cannot be the new one (null: it can; empty: no reason to say).
+fn renameProblem(typed: []const u8) ?[]const u8 {
+    if (typed.len == 0 or std.mem.eql(u8, typed, rename_current)) return "";
+    return switch (rename_target) {
+        .cloud => if (typed.len > 60) translated("At most 60 characters.") else null,
+        .local => nameProblem(typed),
+    };
+}
+
+fn renameState(fields: *[2]sheet.Field) sheet.State {
+    const size = window.size();
+    const typed = std.mem.trim(u8, rename_field.value(), " ");
+    const problem = renameProblem(typed);
+    const hint = switch (rename_target) {
+        .cloud => translated("Its address stays the same."),
+        .local => translated("Also the folder\u{2019}s name, and how the publr command finds it."),
+    };
+    const note: ?sheet.Note = if (sheet_error) |e| .{
+        .text = e,
+        .kind = .bad,
+    } else if (problem) |pr| (if (pr.len > 0) sheet.Note{
+        .text = pr,
+        .kind = .bad,
+    } else .{
+        .text = hint,
+    }) else .{
+        .text = hint,
+    };
+    fields[0] = .{
+        .label = translated("Project name"),
+        .field = &rename_field,
+        .note = note,
+    };
+    return .{
+        .title = filled(frame_arena.allocator(), translated("Rename {project}"), .{
+            .project = rename_current,
+        }) catch "",
+        .description = "",
+        .fields = fields[0..1],
+        .primary = translated("Rename"),
+        .primary_enabled = problem == null,
+        .busy = sheet_busy,
+        .hover = sheet_hover,
+        .window_width = @floatCast(size.w),
+        .window_height = @floatCast(size.h),
+    };
+}
+
+fn saveRename() void {
+    if (sheet_busy != null) return;
+    const typed = std.mem.trim(u8, rename_field.value(), " ");
+    if (renameProblem(typed) != null) return;
+    sheet_busy = translated("Saving\u{2026}");
+    redrawAll();
+    switch (rename_target) {
+        .cloud => |slug| cloud.renameProject(slug, typed, renamedOnCloud),
+        .local => |name| {
+            const job = gpa.create(RenameSite) catch return;
+            job.* = .{
+                .from = gpa.dupe(u8, name) catch return gpa.destroy(job),
+                .to = gpa.dupe(u8, typed) catch return gpa.destroy(job),
+            };
+            platform.spawn(RenameSite.run, .{job}) catch return;
+        },
+    }
+}
+
+fn renamedOnCloud(problem: ?[]const u8) void {
+    sheet_busy = null;
+    if (problem) |pr| {
+        sheet_error = pr;
+        return redrawAll();
+    }
+    // Its open tab takes the new name now; Home, once Cloud is read again.
+    const slug = switch (rename_target) {
+        .cloud => |held| held,
+        .local => "",
+    };
+    const name = std.mem.trim(u8, rename_field.value(), " ");
+    for (tabs.items) |*t| if (t.project) |pt| {
+        const linked = cloudProjectOf(pt.live);
+        if (linked != null and std.mem.eql(u8, linked.?.slug, slug)) retitleTab(t, name);
+    };
+    cloud.refresh();
+    closeSheet();
+}
+
+fn retitleTab(t: *Tab, name: []const u8) void {
+    const kept = gpa.dupe(u8, name) catch return;
+    gpa.free(t.name);
+    t.name = kept;
+}
+
+/// A site's folder renamed off the main thread (its server may stop and start), then the
+/// lists and its open tab follow it on the main thread.
+const RenameSite = struct {
+    from: []u8,
+    to: []u8,
+    problem: ?[]const u8 = null,
+
+    fn run(self: *RenameSite) void {
+        sites.rename(self.from, self.to) catch |e| {
+            self.problem = switch (e) {
+                error.NameTaken => translated("A site with this name is on this Mac already."),
+                error.InvalidName => translated("Lowercase letters, numbers and dashes only."),
+                else => translated("The project could not be renamed."),
+            };
+        };
+        platform.runOnMain(self, finish);
+    }
+
+    fn finish(ctx: ?*anyopaque) callconv(.c) void {
+        const self: *RenameSite = @ptrCast(@alignCast(ctx));
+        defer gpa.destroy(self);
+        defer gpa.free(self.from);
+        defer gpa.free(self.to);
+        sheet_busy = null;
+        if (self.problem) |pr| {
+            sheet_error = pr;
+            return redrawAll();
+        }
+        for (tabs.items) |*t| {
+            if (t.project) |pt| {
+                if (!std.mem.eql(u8, pt.folder, self.from)) continue;
+                pt.folder = pt.arena.allocator().dupe(u8, self.to) catch pt.folder;
+                retitleTab(t, self.to);
+            } else if (t.url == null and std.mem.eql(u8, t.name, self.from)) {
+                retitleTab(t, self.to);
+            }
+        }
+        renameRecent(self.from, self.to);
+        refreshSites();
+        closeSheet();
+    }
+};
 
 /// Projects' sidebar folded to a strip, as last left (`support_dir/sidebar`).
 var side_folded = false;
@@ -1910,7 +2134,7 @@ fn setView(v: home.View) void {
 /// (this Mac keeps the folder in sync); any other its own admin.
 fn openLocal(name: []const u8) void {
     const s = sites.find(name) orelse return;
-    openProjectTab(name, name, s.live, spaceOf(s.live));
+    openProjectTab(shownName(s), name, s.live, spaceOf(s.live));
 }
 
 /// A site on this Mac in the browser: a linked folder's live site; any other's own. A stopped
@@ -1945,6 +2169,7 @@ fn act(name: []const u8, tag: u32) void {
         Action.stop => sites.stop(name),
         Action.start => sites.start(name),
         Action.upgrade => return openUpgrade(name),
+        Action.rename => return renameLocal(name),
         Action.download_media => syncing.downloadMedia(name),
         Action.trash => {
             for (tabs.items, 0..) |t, i| if (t.url == null and t.project == null and std.mem.eql(u8, t.name, name)) {
@@ -2343,6 +2568,7 @@ fn sheetState(fields: *[2]sheet.Field) sheet.State {
     if (open_sheet == .language) return languageState();
     if (open_sheet == .edit_app) return editAppState(fields);
     if (open_sheet == .remove_app) return removeAppState();
+    if (open_sheet == .rename) return renameState(fields);
     if (open_sheet == .deploy) return deployState(fields);
     if (open_sheet == .deployed) return deployedState();
     if (open_sheet == .upgrade) return upgradeState();
@@ -2459,6 +2685,7 @@ fn sheetField() *ui.TextField {
     if (open_sheet == .admin) return &admin_field;
     if (open_sheet == .new_project and sheet_focus == 1) return &slug_field;
     if (open_sheet == .edit_app) return if (sheet_focus == 1) &app_path_field else &app_label_field;
+    if (open_sheet == .rename) return &rename_field;
     return &name_field;
 }
 
@@ -2488,6 +2715,7 @@ fn primaryAction() void {
         .language => saveLanguage(),
         .edit_app => saveApp(),
         .remove_app => removeApp(),
+        .rename => saveRename(),
         // The welcome stays until the browser answers: signed in closes it, a no is said on it.
         .welcome => if (cloud.status == .signed_out) {
             cloud.signIn();
@@ -3325,6 +3553,9 @@ fn clickProject(i: usize, target: project.Target, mods: platform.event.Mods) voi
         }),
         .callout => if (pt.live.len == 0) openUpgrade(pt.folder) else if (syncing.reviewOf(pt.folder) != null) openReview(pt.folder, pt.live) else syncing.send(pt.folder),
         .rare => |r| switch (r) {
+            .rename => if (pt.folder.len > 0) renameLocal(pt.folder) else if (cloudProjectOf(pt.live)) |p| openRename(.{
+                .cloud = p.slug,
+            }, p.name),
             .clone => startClone(pt),
             .finder => showInFinder(pt.folder),
             .copy_path => copyPath(pt.folder),
@@ -3880,6 +4111,20 @@ fn rememberRecent(name: []const u8) void {
     };
     recents.insert(gpa, 0, gpa.dupe(u8, name) catch return) catch return;
     if (recents.items.len > 50) gpa.free(recents.pop().?);
+    saveRecents();
+}
+
+/// A renamed site keeps its place among the recents.
+fn renameRecent(from: []const u8, to: []const u8) void {
+    for (recents.items) |*held| if (std.mem.eql(u8, held.*, from)) {
+        const kept = gpa.dupe(u8, to) catch return;
+        gpa.free(held.*);
+        held.* = kept;
+        return saveRecents();
+    };
+}
+
+fn saveRecents() void {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(gpa);
     for (recents.items) |r| {

@@ -326,6 +326,17 @@ pub const Sites = struct {
 
     /// Stopped and moved to its folder's `.trash`, as `publr rm` does; a single site's own
     /// entry goes off the list with it.
+    /// The site `name` renamed `new_name`: its folder moved, a running server restarted, as
+    /// `publr rename` does (the command's core). Reads and writes the disk, not `list`: call
+    /// it off the main thread.
+    pub fn rename(self: *Sites, name: []const u8, new_name: []const u8) !void {
+        var arena: std.heap.ArenaAllocator = .init(self.gpa);
+        defer arena.deinit();
+        var config = try core.Config.load(self.io, arena.allocator(), self.env);
+        const site = try locate(&config, name);
+        _ = try core.rename.rename(&config, site, new_name);
+    }
+
     pub fn remove(self: *Sites, name: []const u8) void {
         var arena: std.heap.ArenaAllocator = .init(self.gpa);
         defer arena.deinit();

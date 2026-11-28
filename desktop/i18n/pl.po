@@ -830,3 +830,24 @@ msgstr "Pobierz multimedia · {size}"
 
 msgid "Downloading media…"
 msgstr "Pobieranie multimediów…"
+
+msgid "Rename…"
+msgstr "Zmień nazwę…"
+
+msgid "Rename"
+msgstr "Zmień nazwę"
+
+msgid "Rename {project}"
+msgstr "Zmień nazwę projektu {project}"
+
+msgid "Its address stays the same."
+msgstr "Jego adres się nie zmienia."
+
+msgid "Also the folder’s name, and how the publr command finds it."
+msgstr "To także nazwa folderu i to, jak znajduje go polecenie publr."
+
+msgid "The project could not be renamed."
+msgstr "Nie udało się zmienić nazwy projektu."
+
+msgid "Couldn’t rename the project. Use 1 to 60 characters, then try again."
+msgstr "Nie udało się zmienić nazwy projektu. Użyj od 1 do 60 znaków i spróbuj ponownie."

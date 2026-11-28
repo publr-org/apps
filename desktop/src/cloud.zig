@@ -184,6 +184,28 @@ pub const Cloud = struct {
             .cloud = self,
             .token = self.gpa.dupe(u8, token) catch return,
             .sent = sent,
+            .path = "/api/cloud.manage_apps",
+            .refused = translated("Couldn\u{2019}t save the change. Check the name and path, then try again. Reserved paths such as /admin and /api cannot be used."),
+            .done = done,
+        };
+        platform.spawn(ManageApp.run, .{job}) catch return;
+    }
+
+    /// Renames the project `slug` on Cloud, its address unchanged: `cloud.rename_project`, as the
+    /// dashboard's Settings does. `done` gets why not, or null, on the main thread.
+    pub fn renameProject(self: *Cloud, slug: []const u8, name: []const u8, done: *const fn (problem: ?[]const u8) void) void {
+        const token = self.token orelse return done(translated("Publr Cloud could not be reached."));
+        const sent = std.json.Stringify.valueAlloc(self.gpa, .{
+            .project = slug,
+            .name = name,
+        }, .{}) catch return;
+        const job = self.gpa.create(ManageApp) catch return;
+        job.* = .{
+            .cloud = self,
+            .token = self.gpa.dupe(u8, token) catch return,
+            .sent = sent,
+            .path = "/api/cloud.rename_project",
+            .refused = translated("Couldn\u{2019}t rename the project. Use 1 to 60 characters, then try again."),
             .done = done,
         };
         platform.spawn(ManageApp.run, .{job}) catch return;
@@ -217,13 +239,17 @@ fn hostPart(address: []const u8) []const u8 {
     return if (std.mem.indexOfScalar(u8, h, '/')) |s| h[0..s] else h;
 }
 
-/// An app of a Cloud project changed (`update`: its name and path) or removed, as the
-/// dashboard's app cards do: `cloud.manage_apps`. `done` gets why not, or null.
+/// A change Cloud makes for the member: an app of a project changed or removed
+/// (`cloud.manage_apps`, as the dashboard's app cards do), or a project renamed
+/// (`cloud.rename_project`). `done` gets why not, or null.
 const ManageApp = struct {
     cloud: *Cloud,
     token: []u8,
     /// The request, written whole on the main thread.
     sent: []u8,
+    /// The operation's route, and what is said when Cloud refuses the change.
+    path: []const u8,
+    refused: []const u8,
     problem: ?[]const u8 = null,
     done: *const fn (problem: ?[]const u8) void,
 
@@ -231,7 +257,7 @@ const ManageApp = struct {
         var arena: std.heap.ArenaAllocator = .init(self.cloud.gpa);
         defer arena.deinit();
         self.problem = translated("Publr Cloud could not be reached.");
-        if (request(self.cloud.io, arena.allocator(), self.cloud.base, .POST, "/api/cloud.manage_apps", .{
+        if (request(self.cloud.io, arena.allocator(), self.cloud.base, .POST, self.path, .{
             .token = self.token,
             .payload = self.sent,
             .content_type = "application/json",
@@ -239,7 +265,7 @@ const ManageApp = struct {
             self.problem = switch (reply.status) {
                 .ok => null,
                 .conflict => translated("Another app already uses this path. Choose a different path."),
-                else => translated("Couldn\u{2019}t save the change. Check the name and path, then try again. Reserved paths such as /admin and /api cannot be used."),
+                else => self.refused,
             };
         } else |_| {}
         platform.runOnMain(self, finish);
